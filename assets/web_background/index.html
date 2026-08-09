@@ -593,7 +593,7 @@
     scene.fog = new THREE.FogExp2(0x050505, 0.05);
 
     const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 500);
-    camera.position.set(0, 0, 5.8);
+    camera.position.set(0, 0, 10.0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setSize(width, height);
@@ -1001,6 +1001,11 @@
         rotSpeedY = 0.025;
         electricArcsGroup.visible = false;
         targetCameraZ = 4.4; // Cinematic dolly zoom in
+      } else if (currentState === "CINEMATIC") {
+        targetScale = 0.95;
+        rotSpeedY = 0.001;
+        electricArcsGroup.visible = false;
+        targetCameraZ = 8.0; // Pushed back for UI space
       } else { // IDLE
         currentState = "IDLE";
         targetScale = 1.0;

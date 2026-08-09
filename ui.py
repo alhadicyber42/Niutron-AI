@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import html as html_lib
 import math
@@ -6896,8 +6897,13 @@ class MainWindow(QMainWindow):
     def _set_page(self, page: str):
         self._current_page = page
         if hasattr(self, "_center_stack") and isinstance(self._center_stack, QStackedWidget):
-            index = {"dashboard": 0, "home": 1, "settings": 2}.get(page, 0)
+            index = {"dashboard": 0, "home": 1, "devices": 2, "settings": 3}.get(page, 0)
             self._center_stack.setCurrentIndex(index)
+        if page == "devices" and hasattr(self, "_devices_page"):
+            try:
+                self._devices_page.refresh()
+            except Exception:
+                pass
         if page == "home" and hasattr(self, "_home_page"):
             try:
                 self._home_page.refresh()
@@ -6928,6 +6934,13 @@ class MainWindow(QMainWindow):
                 self._settings_sidebar.refresh()
             except Exception:
                 pass
+
+    def set_brahma_connect_service(self, service):
+        self._brahma_connect = service
+        if hasattr(self, "_devices_page"):
+            self._devices_page.set_service(service)
+            if service is not None:
+                self._devices_page.refresh(force=True)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -7992,12 +8005,15 @@ class MainWindow(QMainWindow):
         lay.addWidget(section("Workspace"))
         self._nav_items["dashboard"] = NavItem("Dashboard", active=True, letter="[]")
         self._nav_items["home"] = NavItem("Brahma Echo Home", active=False, letter="H")
+        self._nav_items["devices"] = NavItem("Devices", active=False, letter="D")
         self._nav_items["settings"] = NavItem("System & Connect", letter="S")
         self._nav_items["dashboard"].clicked.connect(lambda: activate("dashboard"))
         self._nav_items["home"].clicked.connect(lambda: activate("home"))
+        self._nav_items["devices"].clicked.connect(lambda: activate("devices"))
         self._nav_items["settings"].clicked.connect(lambda: activate("settings"))
         lay.addWidget(self._nav_items["dashboard"])
         lay.addWidget(self._nav_items["home"])
+        lay.addWidget(self._nav_items["devices"])
         lay.addWidget(self._nav_items["settings"])
 
         self._gesture_preview = GestureCameraPreview()
@@ -8129,10 +8145,12 @@ class MainWindow(QMainWindow):
         stage.addWidget(self._command_panel)
 
         self._home_page = BrahmaHomePage()
+        self._devices_page = BrahmaConnectDevicesPage(self)
         self._center_stack = QStackedWidget()
         self._center_stack.setStyleSheet("background: transparent; border: none;")
         self._center_stack.addWidget(w)
         self._center_stack.addWidget(self._home_page)
+        self._center_stack.addWidget(self._devices_page)
         self._settings_page = SystemConnectivityPage()
         self._center_stack.addWidget(self._settings_page)
         self._center_stack.setCurrentIndex(0)
@@ -9902,6 +9920,1470 @@ class BrahmaUI:
 
     def _make_app_icon(self) -> QIcon:
         return _logo_icon()
+
+    def set_brahma_connect_service(self, service):
+        self._win.set_brahma_connect_service(service)
+
+    def show_main(self):
+        try:
+            self._win.showNormal()
+        except Exception:
+            self._win.show()
+        self._win.raise_()
+        self._win.activateWindow()
+        if self._launcher.isVisible():
+            try:
+                self._launcher.raise_()
+                self._launcher.activateWindow()
+            except Exception:
+                pass
+
+    def set_dashboard_page(self, enabled: bool):
+        try:
+            if enabled:
+                if not self._launcher.isVisible():
+                    self._show_floating_icon()
+            else:
+                self._command_bar.hide()
+                self._workspace_sidebar.hide_workspace(animate=False)
+                self._launcher.hide()
+        except Exception:
+            pass
+
+    def hide_main(self):
+        self._command_bar.hide()
+        self._launcher.hide()
+        self._win.hide()
+
+    def _load_app_settings(self) -> dict:
+        if self._app_settings_cache is not None:
+            return dict(self._app_settings_cache)
+        settings = _default_app_settings()
+        if APP_SETTINGS_FILE.exists():
+            try:
+                data = json.loads(APP_SETTINGS_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    settings.update({k: data.get(k, v) for k, v in settings.items()})
+            except Exception:
+                pass
+        self._app_settings_cache = dict(settings)
+        return dict(settings)
+
+    def _save_app_settings(self, settings: dict):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        APP_SETTINGS_FILE.write_text(json.dumps(settings, indent=4), encoding="utf-8")
+        self._app_settings_cache = dict(settings)
+
+    def _save_launcher_position(self, x: int, y: int):
+        try:
+            settings = self._load_app_settings()
+            settings["launcher_pos"] = [int(x), int(y)]
+            self._save_app_settings(settings)
+        except Exception:
+            pass
+
+    def _open_developer_mode_dialog(self):
+        try:
+            dialog = DeveloperModeDialog(self._win, settings=self._load_app_settings())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                settings = dialog.get_settings()
+                self._save_app_settings(settings)
+                self._apply_developer_mode_ui()
+        except Exception:
+            pass
+
+    def _apply_developer_mode_ui(self):
+        try:
+            settings = self._load_app_settings()
+            enabled = bool(settings.get("developer_mode_enabled", False))
+            workspace = str(settings.get("developer_mode_workspace", "")).strip()
+            if hasattr(self._win, "_developer_card") and hasattr(self._win, "_developer_status_lbl"):
+                if enabled:
+                    workspace_text = workspace or "No folder selected"
+                    self._win._developer_status_lbl.setText(
+                        f"Developer mode is on • {workspace_text}"
+                    )
+                    self._win._developer_card.show()
+                    self._win._developer_card.raise_()
+                else:
+                    self._win._developer_card.hide()
+        except Exception:
+            pass
+
+    def _sync_launcher_state(self, state: str):
+        state = (state or "idle").strip().lower()
+        detail = {
+            "listening": "Ready",
+            "thinking": "Thinking...",
+            "processing": "Executing task...",
+            "speaking": "Speaking",
+            "muted": "Muted",
+        }.get(state, "Ready")
+        try:
+            self._launcher.set_state(state, detail)
+        except Exception:
+            pass
+
+    def _load_discord_settings(self) -> dict:
+        settings = _default_discord_settings()
+        if DISCORD_SETTINGS_FILE.exists():
+            try:
+                data = json.loads(DISCORD_SETTINGS_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    settings.update({k: data.get(k, v) for k, v in settings.items()})
+            except Exception:
+                pass
+        if (settings.get("bot_token") or "").strip():
+            settings["enabled"] = True
+        return dict(settings)
+
+    def _save_discord_settings(self, settings: dict):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        DISCORD_SETTINGS_FILE.write_text(json.dumps(settings, indent=4), encoding="utf-8")
+
+    def _emit_discord_settings(self):
+        if not hasattr(self, "_discord_token_input"):
+            return
+        settings = {
+            "bot_token": self._discord_token_input.text().strip(),
+            "enabled": bool(getattr(self, "_discord_enabled", False)),
+            "channel_id": self._discord_channel_input.text().strip() if hasattr(self, "_discord_channel_input") else "",
+        }
+        self._save_discord_settings(settings)
+        self.discord_config_changed.emit(dict(settings))
+        self._refresh_discord_card()
+
+    def _refresh_discord_card(self, note: str = ""):
+        if not hasattr(self, "_discord_status_lbl"):
+            return
+        token = self._discord_token_input.text().strip() if hasattr(self, "_discord_token_input") else ""
+        enabled = bool(getattr(self, "_discord_enabled", False))
+        if note:
+            status = note
+            color = C.PRI if "error" in note.lower() or "missing" in note.lower() else C.TEXT_MED
+        elif not token:
+            status = "Token required"
+            color = C.PRI
+        elif enabled:
+            status = "Bot enabled"
+            color = C.GREEN
+        else:
+            status = "Bot disabled"
+            color = C.TEXT_MED
+        self._discord_status_lbl.setText(status)
+        self._discord_status_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        if hasattr(self, "_discord_start_btn"):
+            self._discord_start_btn.setEnabled(True)
+        if hasattr(self, "_discord_stop_btn"):
+            self._discord_stop_btn.setEnabled(True)
+        if hasattr(self, "_discord_save_btn"):
+            self._discord_save_btn.setText("Save Settings")
+
+    def _startup_animation_enabled(self) -> bool:
+        if platform.system() != "Windows":
+            return False
+        return bool(self._load_app_settings().get("startup_animation_enabled", True))
+
+    def _set_startup_animation_enabled(self, enabled: bool) -> bool:
+        try:
+            settings = self._load_app_settings()
+            settings["startup_animation_enabled"] = bool(enabled)
+            settings["last_boot_stamp"] = _current_boot_stamp()
+            self._save_app_settings(settings)
+            return True
+        except Exception as e:
+            self._log.append_log(f"ERR: startup animation setting failed: {e}")
+            return False
+
+    def _refresh_startup_animation_button(self):
+        if not hasattr(self, "_startup_anim_btn"):
+            return
+        if platform.system() != "Windows":
+            self._startup_anim_btn.setText("Startup Animation (Windows only)")
+            self._startup_anim_btn.setEnabled(False)
+            return
+        if self._startup_animation_enabled():
+            self._startup_anim_btn.setText("Disable Startup Animation")
+        else:
+            self._startup_anim_btn.setText("Enable Startup Animation")
+
+    def _toggle_startup_animation(self):
+        if platform.system() != "Windows":
+            return
+        enabled = not self._startup_animation_enabled()
+        if self._set_startup_animation_enabled(enabled):
+            self._refresh_startup_animation_button()
+            state = "enabled" if enabled else "disabled"
+            self._log.append_log(f"SYS: Startup animation {state}.")
+
+    def _should_play_boot_sequence(self) -> bool:
+        return True
+
+    def _mark_boot_sequence_played(self):
+        try:
+            settings = self._load_app_settings()
+            settings["last_boot_stamp"] = _current_boot_stamp()
+            settings["boot_sequence_played"] = True
+            self._save_app_settings(settings)
+        except Exception:
+            pass
+
+    def play_boot_sequence(self, finished_callback=None):
+        if self._boot_overlay is not None:
+            try:
+                self._boot_overlay.deleteLater()
+            except Exception:
+                pass
+            self._boot_overlay = None
+        self.hide_main()
+        overlay = BootSequenceOverlay()
+        self._boot_overlay = overlay
+
+        device_name = platform.node() or os.environ.get("COMPUTERNAME") or "DEVICE"
+
+        def _done():
+            self._mark_boot_sequence_played()
+            try:
+                self.show_main()
+            finally:
+                if self._boot_overlay is not None:
+                    try:
+                        self._boot_overlay.deleteLater()
+                    except Exception:
+                        pass
+                    self._boot_overlay = None
+                if finished_callback:
+                    finished_callback()
+
+        overlay.finished.connect(_done)
+        overlay.start(device_name=device_name, greeting_name="Suryaansh")
+
+    # Thread-safe helpers for driving the boot overlay from background threads
+    def boot_add_step(self, text: str):
+        try:
+            if not self._boot_overlay:
+                return None
+            QTimer.singleShot(0, lambda: self._boot_overlay.add_step(text))
+        except Exception:
+            pass
+
+    def boot_set_step_status(self, text: str, status: str):
+        try:
+            if not self._boot_overlay:
+                return
+            QTimer.singleShot(0, lambda: self._boot_overlay.set_step_status(text, status))
+        except Exception:
+            pass
+
+    def boot_set_progress(self, percent: int, tip: str | None = None):
+        try:
+            if not self._boot_overlay:
+                return
+            QTimer.singleShot(0, lambda: self._boot_overlay.set_progress(percent, tip))
+        except Exception:
+            pass
+
+    def _build_tray_menu(self) -> QMenu:
+        menu = QMenu()
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: rgba(8, 8, 8, 245);
+                color: {C.WHITE};
+                border: 1px solid {C.BORDER_B};
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            QMenu::item {{
+                padding: 8px 18px;
+                border-radius: 6px;
+            }}
+            QMenu::item:selected {{
+                background: rgba(255,255,255,0.08);
+            }}
+        """)
+
+        open_app_action = menu.addAction("Open App")
+        open_action = menu.addAction("Open Workspace")
+        close_action = menu.addAction("Close Workspace")
+        startup_action = menu.addAction("Show Workspace On Startup")
+        startup_action.setCheckable(True)
+        startup_action.setChecked(bool(self._load_app_settings().get("show_workspace_on_startup", False)))
+        show_icon_action = menu.addAction("Show Floating Icon")
+        hide_icon_action = menu.addAction("Hide Floating Icon")
+        menu.addSeparator()
+        restart_action = menu.addAction("Restart")
+        quit_action = menu.addAction("Quit")
+
+        open_app_action.triggered.connect(self.show_main)
+        open_action.triggered.connect(self._show_workspace_sidebar)
+        close_action.triggered.connect(self._close_workspace_sidebar)
+        startup_action.triggered.connect(lambda: self._toggle_workspace_on_startup(startup_action.isChecked()))
+        show_icon_action.triggered.connect(self._show_floating_icon)
+        hide_icon_action.triggered.connect(self._hide_launcher_with_protection)
+        restart_action.triggered.connect(self._restart_app)
+        quit_action.triggered.connect(self._app.quit)
+        return menu
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._toggle_command_bar()
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_control_panel()
+
+    def _on_minimized(self):
+        if self._launcher.isVisible():
+            self._launcher.raise_()
+        self._command_bar.hide()
+
+    def _toggle_command_bar(self):
+        if self._command_bar.isVisible():
+            self._command_bar.hide()
+        else:
+            self._command_bar.show_near(self._launcher)
+
+    def _toggle_workspace_sidebar(self):
+        if self._workspace_sidebar.isVisible():
+            self._close_workspace_sidebar()
+        else:
+            self._show_workspace_sidebar()
+
+    def _show_workspace_sidebar(self):
+        self._workspace_sidebar.show_workspace()
+        self._launcher.hide()
+
+    def _close_workspace_sidebar(self):
+        self._workspace_sidebar.hide_workspace()
+        self._show_floating_icon()
+
+    def _show_floating_icon(self):
+        launcher_pos = self._load_app_settings().get("launcher_pos")
+        if isinstance(launcher_pos, (list, tuple)) and len(launcher_pos) == 2:
+            try:
+                self._launcher.show_at(int(launcher_pos[0]), int(launcher_pos[1]))
+                return
+            except Exception:
+                pass
+        self._launcher.show_at()
+
+    def _restart_app(self):
+        try:
+            args = _hidden_launch_args("--startup" if _launched_from_windows_startup() else "")
+            args = [arg for arg in args if arg]
+            kwargs = {"cwd": str(BASE_DIR)}
+            if _OS == "Windows":
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(args, **kwargs)
+        except Exception as exc:
+            self._win.write_log(f"ERR: Restart failed: {exc}")
+        self._app.quit()
+
+    def _toggle_workspace_on_startup(self, enabled: bool):
+        try:
+            settings = self._load_app_settings()
+            settings["show_workspace_on_startup"] = bool(enabled)
+            self._save_app_settings(settings)
+        except Exception:
+            pass
+
+    def _hide_launcher_with_protection(self):
+        self._show_hide_launcher_confirm()
+
+    def _show_hide_launcher_confirm(self):
+        panel = LauncherControlPanel(
+            startup_workspace=bool(self._load_app_settings().get("show_workspace_on_startup", False)),
+            on_open=self._show_workspace_sidebar,
+            on_close=self._close_workspace_sidebar,
+            on_toggle_startup=self._toggle_workspace_on_startup,
+            on_hide_icon=self._launcher.hide,
+            on_restart=self._restart_app,
+            on_quit=self._app.quit,
+            on_open_app=self.show_main,
+            on_show_icon=self._show_floating_icon,
+            on_open_dev=self._open_developer_mode_dialog,
+        )
+        self._control_panel = panel
+        self._position_control_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_control_panel(self, panel: LauncherControlPanel):
+        try:
+            geo = self._launcher.geometry()
+            panel.adjustSize()
+            panel.move(max(20, geo.left() - panel.width() - 16), max(20, geo.top() - 10))
+        except Exception:
+            screen = QApplication.primaryScreen().availableGeometry()
+            panel.move(screen.center().x() - panel.width() // 2, screen.center().y() - panel.height() // 2)
+
+    def _show_control_panel(self):
+        self._show_hide_launcher_confirm()
+
+    def _handle_launcher_action(self, action: str):
+        action = (action or "").strip().lower()
+        if action == "open_app":
+            self.show_main()
+        elif action == "open_workspace":
+            self._show_workspace_sidebar()
+        elif action == "close_workspace":
+            self._close_workspace_sidebar()
+        elif action == "show_icon":
+            self._show_floating_icon()
+        elif action == "hide_icon":
+            self._hide_launcher_with_protection()
+        elif action == "restart":
+            self._restart_app()
+        elif action == "quit":
+            self._app.quit()
+        elif action == "toggle_startup":
+            current = bool(self._load_app_settings().get("show_workspace_on_startup", False))
+            self._toggle_workspace_on_startup(not current)
+
+    def _submit_command(self, text: str):
+        self._win.submit_command(text)
+
+    def _browse_attachment(self):
+        self._win._browse_attachment()
+
+    def _toggle_mute(self):
+        self._win._toggle_mute()
+
+    def _on_chat_event(self, event: dict):
+        try:
+            self._discord_service.mirror_chat_event(event or {})
+        except Exception:
+            pass
+        try:
+            self._workspace_sidebar.record_chat_event(event or {})
+        except Exception:
+            pass
+        try:
+            self._win._inline_workspace.record_chat_event(event or {})
+        except Exception:
+            pass
+
+    def _on_discord_config_changed(self, settings: dict):
+        settings = settings or {}
+        enabled = bool(settings.get("enabled", False) or (settings.get("bot_token") or "").strip())
+        token = (settings.get("bot_token") or "").strip()
+        channel_id = (settings.get("channel_id") or "").strip()
+        self._discord_service.set_target_channel_id(channel_id)
+        if not enabled or not token:
+            self._discord_service.stop()
+            if not token:
+                self._win.discord_status_changed.emit("Token required")
+            else:
+                self._win.discord_status_changed.emit("Discord bot disabled")
+            return
+        try:
+            self._discord_service.start(token)
+        except Exception as exc:
+            msg = f"Discord error: {exc}"
+            self._win.discord_status_changed.emit(msg)
+            self._win._log_sig.emit(f"ERR: {msg}")
+
+    def _open_app(self):
+        self._command_bar.hide()
+        self._launcher.show_at()
+        self._win.show_app()
+
+    @property
+    def muted(self) -> bool:
+        return self._win._muted
+
+    @muted.setter
+    def muted(self, v: bool):
+        if v != self._win._muted:
+            self._win._toggle_mute()
+
+    def set_muted(self, muted: bool):
+        if bool(muted) != self._win._muted:
+            self._win.set_muted_state(bool(muted))
+
+    def set_muted_state(self, muted: bool, *, wakeword: bool = False):
+        self._win.set_muted_state(bool(muted), wakeword=wakeword)
+
+    @property
+    def current_file(self) -> str | None:
+        return self._win._current_file
+
+    @property
+    def on_text_command(self):
+        return self._win.on_text_command
+
+    @on_text_command.setter
+    def on_text_command(self, cb):
+        self._win.on_text_command = cb
+
+    @property
+    def on_remote_clicked(self):
+        return self._win.on_remote_clicked
+
+    @on_remote_clicked.setter
+    def on_remote_clicked(self, cb):
+        self._win.on_remote_clicked = cb
+
+    @property
+    def on_attention_action(self):
+        return self._win.on_attention_action
+
+    @on_attention_action.setter
+    def on_attention_action(self, cb):
+        self._win.on_attention_action = cb
+
+    @property
+    def on_chat_event(self):
+        return self._win.on_chat_event
+
+    @on_chat_event.setter
+    def on_chat_event(self, cb):
+        self._win.on_chat_event = cb
+
+    def set_state(self, state: str):
+        self._win._state_sig.emit(state)
+
+    def write_log(self, text: str):
+        self._win._log_sig.emit(text)
+
+    def show_daily_briefing(self, text: str):
+        self._win.show_daily_briefing(text)
+
+    def hide_daily_briefing(self):
+        self._win.hide_daily_briefing()
+
+    def schedule_daily_briefing_hide(self):
+        self._win.schedule_daily_briefing_hide()
+
+    def submit_external_command(self, text: str, source: str = "discord"):
+        self._win.submit_command(text, source=source)
+
+    def notify_phone_connected(self):
+        self._win.notify_phone_connected()
+
+    def set_scanning(self, enabled: bool, text: str = ""):
+        self._win.set_scanning(enabled, text)
+
+    def show_attention_alert(self, event: dict):
+        self._win._attention_sig.emit(event or {})
+
+    def set_meeting_mode(self, enabled: bool, title: str = "", summary: str = "", answer: str = "", speech: str = ""):
+        self._win.set_meeting_mode(enabled, title, summary, answer, speech)
+
+    def begin_task_workspace(self, command: str, plan: list[str] | str | None = None, source: str = "local"):
+        self._win._task_workspace_sig.emit({
+            "action": "start",
+            "command": command or "",
+            "plan": plan or [],
+            "source": source or "local",
+        })
+
+    def capture_screen_bytes(self) -> bytes:
+        import threading
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QBuffer, QIODevice, Qt
+
+        if threading.current_thread() == threading.main_thread():
+            screen = QApplication.primaryScreen()
+            if not screen: return b""
+            pixmap = screen.grabWindow(0)
+            pixmap = pixmap.scaled(640, 360, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, 'JPG', 55)
+            return buffer.data().data()
+        else:
+            return self._win.capture_screen_threadsafe()
+
+    def update_task_workspace(self, *, title: str | None = None, command: str | None = None, plan: list[str] | str | None = None,
+                              status: str | None = None, output: str | None = None, percent: int | None = None,
+                              footer: str | None = None, source: str | None = None):
+        payload = {"action": "update"}
+        if title is not None:
+            payload["title"] = title
+        if command is not None:
+            payload["command"] = command
+        if plan is not None:
+            payload["plan"] = plan
+        if status is not None:
+            payload["status"] = status
+        if output is not None:
+            payload["output"] = output
+        if percent is not None:
+            payload["percent"] = percent
+        if footer is not None:
+            payload["footer"] = footer
+        if source is not None:
+            payload["source"] = source or "local"
+        self._win._task_workspace_sig.emit(payload)
+
+    def finish_task_workspace(self, result: str, status: str = "Task completed.", percent: int = 100):
+        self._win._task_workspace_sig.emit({
+            "action": "finish",
+            "result": result or "Done.",
+            "status": status or "Task completed.",
+            "percent": percent,
+        })
+
+    def clear_task_workspace(self):
+        self._win._task_workspace_sig.emit({"action": "clear"})
+
+    def wait_for_api_key(self):
+        while not self._win._ready:
+            time.sleep(0.1)
+
+    def start_speaking(self):
+        self.set_state("SPEAKING")
+
+    def stop_speaking(self):
+        if not self.muted:
+            self.set_state("LISTENING")
+
+
+
+
+class _ConnectDeviceCard(QFrame):
+    clicked = pyqtSignal(str)
+    action_requested = pyqtSignal(str, str, dict)
+
+    def __init__(self, device: dict[str, object], parent=None):
+        super().__init__(parent)
+        self.device = device
+        self._expanded = False
+        self.setObjectName("ConnectDeviceCard")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumSize(220, 150)
+        self.setStyleSheet("""
+            QFrame#ConnectDeviceCard {
+                background: rgba(10, 12, 18, 240);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 18px;
+            }
+            QLabel {
+                background: transparent;
+            }
+            QPushButton {
+                background: rgba(255,255,255,0.06);
+                color: #ffffff;
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+                min-height: 30px;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background: rgba(255,170,48,0.12);
+                color: #ffaa30;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        self._title = QLabel(str(device.get("name", "Device")))
+        self._title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self._title.setStyleSheet("color: #ffffff;")
+        layout.addWidget(self._title)
+
+        platform = str(device.get("platform", "UNKNOWN")).upper()
+        status = "ONLINE" if bool(device.get("online")) else "OFFLINE"
+        self._status_label = QLabel(f"{platform} • {status}")
+        self._status_label.setFont(QFont("Segoe UI", 8))
+        self._status_label.setStyleSheet("color: rgba(255,255,255,0.55);")
+        layout.addWidget(self._status_label)
+
+        info = []
+        if device.get("manufacturer"):
+            info.append(str(device.get("manufacturer")))
+        if device.get("device_type"):
+            info.append(str(device.get("device_type")))
+        if device.get("ip"):
+            info.append(str(device.get("ip")))
+        self._info_lbl = QLabel(" · ".join(info) if info else "Connected device")
+        self._info_lbl.setFont(QFont("Segoe UI", 8))
+        self._info_lbl.setStyleSheet("color: rgba(255,255,255,0.45);")
+        self._info_lbl.setWordWrap(True)
+        layout.addWidget(self._info_lbl)
+
+        layout.addStretch(1)
+
+        self._action_container = QFrame(self)
+        self._action_container.setVisible(False)
+        self._action_container.setStyleSheet("QFrame { background: rgba(255,255,255,0.03); border-radius: 14px; }")
+        actions_layout = QHBoxLayout(self._action_container)
+        actions_layout.setContentsMargins(8, 8, 8, 8)
+        actions_layout.setSpacing(8)
+
+        self._rename_btn = QPushButton("Rename")
+        self._disconnect_btn = QPushButton("Disconnect")
+        self._forget_btn = QPushButton("Remove")
+
+        actions_layout.addWidget(self._rename_btn)
+        actions_layout.addWidget(self._disconnect_btn)
+        actions_layout.addWidget(self._forget_btn)
+        layout.addWidget(self._action_container)
+
+        self._rename_btn.clicked.connect(lambda: self.action_requested.emit(str(self.device.get("device_id", "")), "rename", {}))
+        self._disconnect_btn.clicked.connect(lambda: self.action_requested.emit(str(self.device.get("device_id", "")), "disconnect", {}))
+        self._forget_btn.clicked.connect(lambda: self.action_requested.emit(str(self.device.get("device_id", "")), "forget", {}))
+
+    def set_expanded(self, expanded: bool):
+        self._expanded = bool(expanded)
+        self._action_container.setVisible(self._expanded)
+        if self._expanded:
+            self.setStyleSheet("""
+                QFrame#ConnectDeviceCard {
+                    background: rgba(255,255,255,0.06);
+                    border: 1px solid rgba(255,170,48,0.25);
+                    border-radius: 18px;
+                }
+                QLabel {
+                    background: transparent;
+                }
+                QPushButton {
+                    background: rgba(255,255,255,0.08);
+                    color: #ffffff;
+                    border: 1px solid rgba(255,255,255,0.12);
+                    border-radius: 10px;
+                    min-height: 30px;
+                    padding: 0 10px;
+                }
+                QPushButton:hover {
+                    background: rgba(255,170,48,0.16);
+                    color: #ffaa30;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame#ConnectDeviceCard {
+                    background: rgba(10, 12, 18, 240);
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-radius: 18px;
+                }
+                QLabel {
+                    background: transparent;
+                }
+                QPushButton {
+                    background: rgba(255,255,255,0.06);
+                    color: #ffffff;
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-radius: 10px;
+                    min-height: 30px;
+                    padding: 0 10px;
+                }
+                QPushButton:hover {
+                    background: rgba(255,170,48,0.12);
+                    color: #ffaa30;
+                }
+            """)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(str(self.device.get("device_id", "")))
+        super().mouseReleaseEvent(event)
+
+
+class BrahmaConnectDevicesPage(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._service = None
+        self._connected_device = None
+        self._log_snapshot = ""
+        self._card_anims: list[QPropertyAnimation] = []
+        self._cards: list[_ConnectDeviceCard] = []
+        self._selected_device_id: str | None = None
+        self._onboarding_known_device_ids: set[str] = set()
+
+        self.setObjectName("BrahmaConnectDevicesPage")
+        self.setStyleSheet(f"""
+            QFrame#BrahmaConnectDevicesPage {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel {{
+                background: transparent;
+            }}
+        """)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        self._title = QLabel("DEVICES")
+        self._title.setFont(QFont("Segoe UI", 18, QFont.Weight.Black))
+        self._title.setStyleSheet("color: #ffffff; letter-spacing: 2px;")
+        self._subtitle = QLabel("Everything connected to Brahma.")
+        self._subtitle.setFont(QFont("Segoe UI", 9))
+        self._subtitle.setStyleSheet("color: rgba(255,255,255,0.62);")
+        title_box.addWidget(self._title)
+        title_box.addWidget(self._subtitle)
+        header.addLayout(title_box, 1)
+
+        status_wrap = QVBoxLayout()
+        status_wrap.setSpacing(4)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        self._gateway_pill = QLabel("● Gateway Online")
+        self._gateway_pill.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self._gateway_pill.setStyleSheet("color: #35ff75; background: rgba(53,255,117,0.06); border: 1px solid rgba(53,255,117,0.16); border-radius: 12px; padding: 5px 10px;")
+        top_row.addWidget(self._gateway_pill)
+        top_row.addStretch(1)
+        self._add_btn = QPushButton("+ Add Device")
+        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_btn.setFixedHeight(34)
+        self._add_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._add_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 170, 48, 0.10);
+                color: #ffffff;
+                border: 1px solid rgba(255, 170, 48, 0.25);
+                border-radius: 12px;
+                padding: 0 14px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 170, 48, 0.16);
+                border: 1px solid rgba(255, 170, 48, 0.40);
+            }
+        """)
+        self._add_btn.clicked.connect(self._trigger_add_device)
+        top_row.addWidget(self._add_btn)
+        status_wrap.addLayout(top_row)
+        self._gateway_meta = QLabel("Port: 8765  ·  Devices: 0")
+        self._gateway_meta.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._gateway_meta.setFont(QFont("Segoe UI", 8))
+        self._gateway_meta.setStyleSheet("color: rgba(255,255,255,0.42);")
+        status_wrap.addWidget(self._gateway_meta)
+        header.addLayout(status_wrap)
+        root.addLayout(header)
+
+        self._main_stack = QStackedWidget()
+        self._main_stack.setStyleSheet("background: transparent;")
+        
+        # ───────────────────────────────────────────────
+        # PAGE 0 — OVERVIEW (GRID / EMPTY)
+        # ───────────────────────────────────────────────
+        self._overview_page = QWidget()
+        ov_lay = QVBoxLayout(self._overview_page)
+        ov_lay.setContentsMargins(0, 10, 0, 0)
+        ov_lay.setSpacing(12)
+        
+        self._my_devices_lbl = QLabel("MY DEVICES")
+        self._my_devices_lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._my_devices_lbl.setStyleSheet("color: #ffffff; letter-spacing: 1px;")
+        ov_lay.addWidget(self._my_devices_lbl)
+        
+        self._overview_stack = QStackedWidget()
+        
+        # Grid View
+        self._grid_page = QWidget()
+        grid_lay = QVBoxLayout(self._grid_page)
+        grid_lay.setContentsMargins(0, 0, 0, 0)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._grid_host = QWidget()
+        self._grid = QGridLayout(self._grid_host)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(16)
+        self._grid.setVerticalSpacing(16)
+        self._scroll.setWidget(self._grid_host)
+        grid_lay.addWidget(self._scroll)
+        self._overview_stack.addWidget(self._grid_page)
+        
+        # Empty View
+        self._empty_page = QWidget()
+        empty_lay = QVBoxLayout(self._empty_page)
+        empty_lay.addStretch(1)
+        empty_lbl = QLabel("No devices connected yet.")
+        empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_lbl.setFont(QFont("Segoe UI", 12))
+        empty_lbl.setStyleSheet("color: rgba(255,255,255,0.5);")
+        empty_lay.addWidget(empty_lbl)
+        empty_btn = QPushButton("+ ADD DEVICE")
+        empty_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        empty_btn.setFixedSize(160, 40)
+        empty_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        empty_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 170, 48, 0.10);
+                color: #ffaa30;
+                border: 1px solid rgba(255, 170, 48, 0.25);
+                border-radius: 20px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 170, 48, 0.20);
+                border: 1px solid rgba(255, 170, 48, 0.50);
+            }
+        """)
+        empty_btn.clicked.connect(self._trigger_add_device)
+        empty_lay.addWidget(empty_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        empty_lay.addStretch(1)
+        self._overview_stack.addWidget(self._empty_page)
+        
+        ov_lay.addWidget(self._overview_stack)
+        self._main_stack.addWidget(self._overview_page)
+        
+        # ───────────────────────────────────────────────
+        # PAGE 1 — DETAIL VIEW
+        # ───────────────────────────────────────────────
+        self._detail_page = QWidget()
+        det_lay = QVBoxLayout(self._detail_page)
+        det_lay.setContentsMargins(0, 10, 0, 0)
+        det_lay.setSpacing(16)
+        
+        back_btn = QPushButton("← Back to Devices")
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.setFixedSize(140, 32)
+        back_btn.setFont(QFont("Segoe UI", 9))
+        back_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: rgba(255,255,255,0.7); border: none; text-align: left; }
+            QPushButton:hover { color: #ffaa30; }
+        """)
+        back_btn.clicked.connect(self._close_detail)
+        det_lay.addWidget(back_btn)
+        
+        self._detail_header = QHBoxLayout()
+        self._detail_icon = QLabel()
+        self._detail_icon.setFixedSize(48, 48)
+        self._detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._detail_icon.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        self._detail_icon.setStyleSheet("background: rgba(255, 170, 48, 0.10); color: #ffaa30; border: 1px solid rgba(255,170,48,0.22); border-radius: 12px;")
+        self._detail_header.addWidget(self._detail_icon)
+        
+        det_titles = QVBoxLayout()
+        self._detail_title = QLabel()
+        self._detail_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        self._detail_title.setStyleSheet("color: #ffffff;")
+        det_titles.addWidget(self._detail_title)
+        
+        self._detail_status = QLabel()
+        self._detail_status.setFont(QFont("Segoe UI", 10))
+        self._detail_status.setStyleSheet("color: rgba(255,255,255,0.6);")
+        det_titles.addWidget(self._detail_status)
+        self._detail_header.addLayout(det_titles, 1)
+        det_lay.addLayout(self._detail_header)
+        
+        self._detail_scroll = QScrollArea()
+        self._detail_scroll.setWidgetResizable(True)
+        self._detail_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self._detail_content = QWidget()
+        self._detail_content_lay = QVBoxLayout(self._detail_content)
+        self._detail_content_lay.setContentsMargins(0, 10, 0, 10)
+        self._detail_content_lay.setSpacing(16)
+        
+        # Meta info
+        self._detail_meta = QLabel()
+        self._detail_meta.setStyleSheet("color: rgba(255,255,255,0.7);")
+        self._detail_content_lay.addWidget(self._detail_meta)
+        
+        # Controls
+        self._action_box = QFrame()
+        self._action_box.setStyleSheet("QFrame { background: rgba(10, 12, 18, 220); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; }")
+        action_lay = QVBoxLayout(self._action_box)
+        action_lay.setContentsMargins(16, 16, 16, 16)
+        action_title = QLabel("CONTROLS")
+        action_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        action_title.setStyleSheet("color: #ffffff; letter-spacing: 1px;")
+        action_lay.addWidget(action_title)
+        self._action_buttons = QGridLayout()
+        self._action_buttons.setSpacing(8)
+        action_lay.addLayout(self._action_buttons)
+        self._detail_content_lay.addWidget(self._action_box)
+        
+        # Manage
+        manage_box = QFrame()
+        manage_box.setStyleSheet("QFrame { background: rgba(10, 12, 18, 220); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; }")
+        manage_lay = QVBoxLayout(manage_box)
+        manage_lay.setContentsMargins(16, 16, 16, 16)
+        manage_title = QLabel("MANAGE")
+        manage_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        manage_title.setStyleSheet("color: #ffffff; letter-spacing: 1px;")
+        manage_lay.addWidget(manage_title)
+        
+        self._btn_rename = QPushButton("Rename Device")
+        self._btn_disconnect = QPushButton("Disconnect")
+        self._btn_reconnect = QPushButton("Reconnect")
+        self._btn_forget = QPushButton("Forget Device")
+        self._btn_forget.setStyleSheet("QPushButton { color: #ff5555; } QPushButton:hover { background: rgba(255, 85, 85, 0.1); border-color: #ff5555; }")
+        
+        manage_grid = QGridLayout()
+        manage_grid.setSpacing(8)
+        for i, b in enumerate([self._btn_rename, self._btn_disconnect, self._btn_reconnect, self._btn_forget]):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setMinimumHeight(34)
+            if b != self._btn_forget:
+                b.setStyleSheet("""
+                    QPushButton { background: rgba(255,255,255,0.03); color: #ffffff; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+                    QPushButton:hover { background: rgba(255,170,48,0.08); border: 1px solid rgba(255,170,48,0.22); color: #ffaa30; }
+                """)
+            else:
+                b.setStyleSheet("""
+                    QPushButton { background: rgba(255,255,255,0.03); color: #ff5555; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+                    QPushButton:hover { background: rgba(255,85,85,0.1); border: 1px solid rgba(255,85,85,0.3); }
+                """)
+            manage_grid.addWidget(b, i // 2, i % 2)
+            
+        manage_lay.addLayout(manage_grid)
+        self._detail_content_lay.addWidget(manage_box)
+        self._detail_content_lay.addStretch(1)
+        self._detail_scroll.setWidget(self._detail_content)
+        det_lay.addWidget(self._detail_scroll)
+        
+        self._main_stack.addWidget(self._detail_page)
+        
+        # ───────────────────────────────────────────────
+        # PAGE 2 — ADD DEVICE (QR WIZARD)
+        # ───────────────────────────────────────────────
+        self._add_device_page = QWidget()
+        add_lay = QVBoxLayout(self._add_device_page)
+        add_lay.setContentsMargins(0, 10, 0, 0)
+        
+        add_back_btn = QPushButton("← Cancel")
+        add_back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_back_btn.setFixedSize(140, 32)
+        add_back_btn.setFont(QFont("Segoe UI", 9))
+        add_back_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: rgba(255,255,255,0.7); border: none; text-align: left; }
+            QPushButton:hover { color: #ffaa30; }
+        """)
+        add_back_btn.clicked.connect(self._close_detail)
+        add_lay.addWidget(add_back_btn)
+        
+        # Re-use the stacked widget logic for the wizard steps
+        self._wizard_stack = QStackedWidget()
+        
+        # Wizard State 0: Select Platform
+        w0 = QWidget()
+        w0_lay = QVBoxLayout(w0)
+        w0_lay.addStretch(1)
+        w0_title = QLabel("SELECT DEVICE TYPE")
+        w0_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        w0_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        w0_title.setStyleSheet("color: #ffffff; letter-spacing: 2px;")
+        w0_lay.addWidget(w0_title)
+        w0_lay.addSpacing(20)
+        
+        w0_row = QHBoxLayout()
+        w0_row.addStretch(1)
+        self._cs_android_btn = QPushButton("ANDROID")
+        self._cs_android_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cs_android_btn.setFixedSize(140, 80)
+        self._cs_android_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self._cs_android_btn.setStyleSheet("""
+            QPushButton { background: rgba(10, 12, 18, 220); color: rgba(255,255,255,0.9); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; }
+            QPushButton:hover { color: #ffaa30; border: 1px solid rgba(255,170,48,0.6); background: rgba(255,170,48,0.1); }
+        """)
+        self._cs_android_btn.clicked.connect(self._cinema_select_android)
+        w0_row.addWidget(self._cs_android_btn)
+        
+        self._cs_pc_btn = QPushButton("PC\n(Coming Soon)")
+        self._cs_pc_btn.setFixedSize(140, 80)
+        self._cs_pc_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._cs_pc_btn.setEnabled(False)
+        self._cs_pc_btn.setStyleSheet("QPushButton { background: rgba(10, 12, 18, 120); color: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; }")
+        w0_row.addWidget(self._cs_pc_btn)
+        w0_row.addStretch(1)
+        w0_lay.addLayout(w0_row)
+        w0_lay.addStretch(1)
+        self._wizard_stack.addWidget(w0)
+        
+        # Wizard State 1: QR Code
+        w1 = QWidget()
+        w1_lay = QVBoxLayout(w1)
+        w1_lay.addStretch(1)
+        w1_title = QLabel("SCAN TO CONNECT")
+        w1_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        w1_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        w1_title.setStyleSheet("color: #ffffff; letter-spacing: 2px;")
+        w1_lay.addWidget(w1_title)
+        w1_lay.addSpacing(16)
+        
+        w1_qr_row = QHBoxLayout()
+        w1_qr_row.addStretch(1)
+        self._onb_qr_label = QLabel()
+        self._onb_qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._onb_qr_label.setFixedSize(200, 200)
+        self._onb_qr_label.setStyleSheet("background: #ffffff; border-radius: 6px; padding: 4px;")
+        w1_qr_row.addWidget(self._onb_qr_label)
+        w1_qr_row.addStretch(1)
+        w1_lay.addLayout(w1_qr_row)
+        
+        w1_lay.addSpacing(16)
+        self._onb_code_lbl = QLabel("------")
+        self._onb_code_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._onb_code_lbl.setFont(QFont("Consolas", 18, QFont.Weight.Black))
+        self._onb_code_lbl.setStyleSheet("color: #ffaa30; letter-spacing: 6px;")
+        w1_lay.addWidget(self._onb_code_lbl)
+        
+        self._onb_status_lbl = QLabel("WAITING FOR CONNECTION")
+        self._onb_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._onb_status_lbl.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self._onb_status_lbl.setStyleSheet("color: rgba(255,255,255,0.5); letter-spacing: 1px;")
+        w1_lay.addWidget(self._onb_status_lbl)
+        
+        w1_ctrl = QHBoxLayout()
+        w1_ctrl.addStretch(1)
+        w1_ref = QPushButton("Refresh Code")
+        w1_ref.setCursor(Qt.CursorShape.PointingHandCursor)
+        w1_ref.setFixedSize(120, 32)
+        w1_ref.setStyleSheet("""
+            QPushButton { background: rgba(255,255,255,0.05); color: #ffffff; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; }
+            QPushButton:hover { background: rgba(255,255,255,0.1); }
+        """)
+        w1_ref.clicked.connect(self._refresh_onboarding_offer)
+        w1_ctrl.addWidget(w1_ref)
+        w1_ctrl.addStretch(1)
+        w1_lay.addLayout(w1_ctrl)
+        w1_lay.addStretch(1)
+        self._wizard_stack.addWidget(w1)
+        
+        # Wizard State 2: Success
+        w2 = QWidget()
+        w2_lay = QVBoxLayout(w2)
+        w2_lay.addStretch(1)
+        self._onb_success_title = QLabel("DEVICE CONNECTED")
+        self._onb_success_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._onb_success_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Black))
+        self._onb_success_title.setStyleSheet("color: #35ff75; letter-spacing: 2px;")
+        w2_lay.addWidget(self._onb_success_title)
+        self._onb_success_name = QLabel("")
+        self._onb_success_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._onb_success_name.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        self._onb_success_name.setStyleSheet("color: #ffffff;")
+        w2_lay.addWidget(self._onb_success_name)
+        w2_lay.addStretch(1)
+        self._wizard_stack.addWidget(w2)
+        
+        add_lay.addWidget(self._wizard_stack)
+        self._main_stack.addWidget(self._add_device_page)
+        
+        root.addWidget(self._main_stack)
+        
+        self._onboarding_timer = QTimer(self)
+        self._onboarding_timer.timeout.connect(self._tick_onboarding)
+        self._onboarding_offer = {}
+        self._onboarding_pulse = 0
+
+    def _service_obj(self):
+        return self._service or getattr(self.parentWidget(), "_brahma_connect", None)
+
+    def set_service(self, service):
+        self._service = service
+
+    def _trigger_add_device(self):
+        self._main_stack.setCurrentIndex(2)
+        self._wizard_stack.setCurrentIndex(0)
+
+    def _cinema_select_android(self):
+        self._wizard_stack.setCurrentIndex(1)
+        service = self._service_obj()
+        self._onboarding_known_device_ids = set(str(d.get("device_id", "")) for d in service.list_devices()) if service else set()
+        self._onboarding_timer.start(1000)
+        self._refresh_onboarding_offer()
+
+    def _refresh_onboarding_offer(self):
+        service = self._service_obj()
+        if service is None:
+            self._onboarding_offer = {}
+            self._onb_code_lbl.setText("------")
+            self._onb_status_lbl.setText("GATEWAY UNAVAILABLE")
+            return
+        try:
+            import io
+            import qrcode
+
+            self._onboarding_offer = dict(service.create_pairing_offer(device_name="Brahma Connect", platform="gateway"))
+            code = str(self._onboarding_offer.get("pairing_code") or "------")
+            self._onb_code_lbl.setText(code)
+            self._onb_status_lbl.setText("WAITING FOR CONNECTION")
+            
+            payload = self._onboarding_offer
+            text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+            if qrcode is not None:
+                qr = qrcode.QRCode(box_size=6, border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+                qr.add_data(text)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                pix = QPixmap()
+                pix.loadFromData(buf.getvalue(), "PNG")
+                self._onb_qr_label.setPixmap(
+                    pix.scaled(
+                        self._onb_qr_label.size(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            else:
+                self._onb_qr_label.setText(text)
+                
+            self._tick_onboarding()
+        except Exception as exc:
+            self._onboarding_offer = {}
+            self._onb_code_lbl.setText("------")
+            self._onb_status_lbl.setText(f"ERROR: {exc}")
+
+    def _tick_onboarding(self):
+        if self._wizard_stack.currentIndex() != 1:
+            return
+        
+        expires = self._onboarding_offer.get("expires")
+        try:
+            remaining = max(0, int(expires))
+            if remaining <= 0 and self._onboarding_offer:
+                self._onb_status_lbl.setText("CODE EXPIRED. REFRESH TO CONTINUE.")
+        except Exception:
+            pass
+            
+        service = self._service_obj()
+        if service and self._onboarding_offer:
+            devices = service.list_devices()
+            new_device = next(
+                (d for d in devices if str(d.get("device_id", "")) not in self._onboarding_known_device_ids),
+                None,
+            )
+            if new_device:
+                self._onboarding_timer.stop()
+                self._connected_device = new_device
+                self._trigger_onboarding_success()
+
+    def _trigger_onboarding_success(self):
+        self._wizard_stack.setCurrentIndex(2)
+        dev = self._connected_device
+        self._onb_success_name.setText(str(dev.get("name", "Device")).upper())
+        QTimer.singleShot(2000, lambda: self.refresh(force=True))
+
+    def _cancel_onboarding(self):
+        self._onboarding_timer.stop()
+        self._close_detail()
+
+    def _clear_layout(self, layout):
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
+
+    def _on_device_selected(self, device_id: str):
+        if self._selected_device_id == device_id:
+            self._selected_device_id = None
+        else:
+            self._selected_device_id = device_id
+        self.refresh(force=True)
+
+    def _on_card_action_requested(self, device_id: str, action: str, payload: dict):
+        if action == "rename":
+            service = self._service_obj()
+            if not service:
+                return
+            device = next((d for d in service.list_devices() if str(d.get("device_id", "")) == device_id), None)
+            if device:
+                self._rename_device(device_id, str(device.get("name", "")))
+            return
+        if action == "disconnect":
+            self._apply_tile_action(device_id, "disconnect", payload)
+            return
+        if action == "forget":
+            self._apply_tile_action(device_id, "forget", payload)
+            return
+        self._apply_tile_action(device_id, action, payload)
+        return
+
+    def _close_detail(self):
+        self._selected_device_id = None
+        self._main_stack.setCurrentIndex(0)
+        self.refresh(force=True)
+
+    def refresh(self, force: bool = False):
+        service = self._service_obj()
+        if service is None:
+            return
+            
+        devices = service.list_devices()
+        port = getattr(service, "port", 8765)
+        self._gateway_meta.setText(f"Port: {port}  ·  Devices: {len(devices)}")
+        
+        # If we are in Add Device or Detail page, keep it there
+        if self._main_stack.currentIndex() not in (0,):
+            pass # Keep current index unless forced to reset
+        elif len(devices) == 0:
+            self._main_stack.setCurrentIndex(0)
+            self._overview_stack.setCurrentIndex(1) # Empty state
+        else:
+            self._main_stack.setCurrentIndex(0)
+            self._overview_stack.setCurrentIndex(0) # Grid state
+            
+        # Rebuild grid
+        self._clear_layout(self._grid)
+        self._cards.clear()
+        
+        if devices:
+            cols = 4
+            for i, dev in enumerate(devices):
+                card = _ConnectDeviceCard(dev)
+                card.clicked.connect(self._on_device_selected)
+                card.action_requested.connect(self._on_card_action_requested)
+                card.set_expanded(str(dev.get("device_id", "")) == self._selected_device_id)
+                self._cards.append(card)
+                self._grid.addWidget(card, i // cols, i % cols)
+            self._grid.setRowStretch(len(devices) // cols + 1, 1)
+
+    def _apply_tile_action(self, device_id: str, action: str, payload: dict):
+        service = self._service_obj()
+        if not service:
+            return
+        try:
+            if action == "rename":
+                device = next((d for d in service.list_devices() if str(d.get("device_id", "")) == device_id), None)
+                if device:
+                    self._rename_device(device_id, str(device.get("name", "")))
+                    return
+            elif action == "disconnect":
+                if hasattr(service, "disconnect_device"):
+                    try:
+                        asyncio.run(service.disconnect_device(device_id))
+                    except Exception:
+                        pass
+            elif action == "forget":
+                self._forget_device(device_id)
+                return
+            else:
+                if hasattr(service, "route_command"):
+                    service.route_command(device_id, action, payload)
+                else:
+                    service.execute_device_action(device_id, action, payload)
+        except Exception:
+            pass
+        QTimer.singleShot(200, lambda: self.refresh(force=True))
+
+    def _rename_device(self, device_id: str, current_name: str):
+        new_name, ok = QInputDialog.getText(self, "Rename Device", "New name:", text=current_name)
+        if ok and new_name.strip():
+            service = self._service_obj()
+            if service:
+                try:
+                    service.rename_device(device_id, new_name.strip())
+                    self._on_device_selected(device_id)
+                except Exception:
+                    pass
+            self.refresh(force=True)
+
+    def _forget_device(self, device_id: str):
+        service = self._service_obj()
+        if service:
+            try:
+                if hasattr(service, "forget_device"):
+                    service.forget_device(device_id)
+                elif hasattr(service, "gateway") and hasattr(service.gateway, "device_manager"):
+                    service.gateway.device_manager.remove(device_id)
+            except Exception:
+                pass
+        self._close_detail()
+        self.refresh(force=True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh(force=True)
+
+class _RootShim:
+    def __init__(self, app: QApplication):
+        self._app = app
+    def mainloop(self):
+        self._app.exec()
+    def protocol(self, *_):
+        pass
+
+
+class BrahmaUI:
+    def __init__(self, face_path: str, size=None, *, show_immediately: bool = True):
+        self._app = QApplication.instance() or QApplication(sys.argv)
+        self._app.setStyle("Fusion")
+        self._app.setQuitOnLastWindowClosed(False)
+        self._app.setApplicationDisplayName("Brahma Echo")
+        self._app.setWindowIcon(self._make_app_icon())
+        try:
+            current_store = workspace_store()
+            current_store.rollover_active_conversation_on_startup()
+        except Exception:
+            pass
+        self._win = MainWindow(face_path)
+        try:
+            self._win._startup_enabled()
+        except Exception:
+            pass
+        self._win.set_settings_bridge(self)
+        self._discord_service = DiscordBotService(
+            status_callback=self._win.discord_status_changed.emit,
+            log_callback=self._win._log_sig.emit,
+        )
+        self._discord_service.bind_app_submitter(self._win.submit_command)
+        self._win.discord_config_changed.connect(self._on_discord_config_changed)
+        self._win.on_chat_event = self._on_chat_event
+        self._app.aboutToQuit.connect(self._discord_service.stop)
+        self._launcher = FloatingLauncher()
+        self._command_bar = CommandBar()
+        self._workspace_sidebar = WorkspaceSidebar()
+        self._control_panel: LauncherControlPanel | None = None
+        self._boot_overlay: BootSequenceOverlay | None = None
+        self._app_settings_cache: dict | None = None
+        self._launcher.single_clicked.connect(self._toggle_command_bar)
+        self._launcher.double_clicked.connect(self._show_control_panel)
+        self._launcher.action_requested.connect(self._handle_launcher_action)
+        self._launcher.position_changed.connect(self._save_launcher_position)
+        self._command_bar.submitted.connect(self._submit_command)
+        self._command_bar.attach_clicked.connect(self._browse_attachment)
+        self._command_bar.mic_clicked.connect(self._toggle_mute)
+        self._command_bar.developer_clicked.connect(self._open_developer_mode_dialog)
+        self._workspace_sidebar.command_submitted.connect(self._submit_command)
+        self._workspace_sidebar.attach_requested.connect(self._browse_attachment)
+        self._workspace_sidebar.mic_requested.connect(self._toggle_mute)
+        self._workspace_sidebar.close_requested.connect(self._close_workspace_sidebar)
+        self._win.minimized.connect(self._on_minimized)
+        self._win._state_sig.connect(self._sync_launcher_state)
+        self._tray = QSystemTrayIcon(self._make_app_icon(), self._app)
+        self._tray.setToolTip("Brahma Echo")
+        self._tray.activated.connect(self._on_tray_activated)
+        self._tray.setContextMenu(self._build_tray_menu())
+        self._tray.show()
+        self._win._log_sig.connect(self._workspace_sidebar.append_log)
+        self._win._task_workspace_sig.connect(self._workspace_sidebar.apply_task_workspace)
+        self._win._task_workspace_sig.connect(self._win._inline_workspace.apply_task_workspace)
+        self._on_discord_config_changed(self._win._load_discord_settings())
+        launcher_pos = self._load_app_settings().get("launcher_pos")
+        if isinstance(launcher_pos, (list, tuple)) and len(launcher_pos) == 2:
+            try:
+                self._launcher.show_at(int(launcher_pos[0]), int(launcher_pos[1]))
+            except Exception:
+                self._launcher.show_at()
+        else:
+            self._launcher.show_at()
+        if bool(self._load_app_settings().get("show_workspace_on_startup", False)):
+            self._workspace_sidebar.show_workspace(animate=False)
+        else:
+            self._workspace_sidebar.hide_workspace(animate=False)
+        self.set_dashboard_page(getattr(self._win, "_current_page", "dashboard") == "dashboard")
+        self._apply_developer_mode_ui()
+        if show_immediately:
+            self.show_main()
+        self.root = _RootShim(self._app)
+
+    def _make_app_icon(self) -> QIcon:
+        return _logo_icon()
+
+    def set_brahma_connect_service(self, service):
+        self._win.set_brahma_connect_service(service)
 
     def show_main(self):
         try:

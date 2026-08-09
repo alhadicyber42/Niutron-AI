@@ -63,6 +63,7 @@ Brahma AI - Lite is an open-source desktop assistant designed for Windows power 
 - Discord bridge for remote commands and chat
 - Local credential management for Gemini and OpenRouter
 - Configurable voice, notifications, startup, and UI preferences
+- Brahma Connect foundation for local multi-device pairing and command routing
 
 ## How It Works
 
@@ -75,6 +76,7 @@ Brahma AI - Lite is built on a layered desktop architecture that separates UI, A
 - `daily_briefing.py` constructs the morning briefing text and triggers playback after startup.
 - `ui.py` provides a polished Qt-based interface with command entry, workspace cards, and status feedback.
 - `or_client.py` provides OpenRouter fallback support when Gemini is unavailable or rate-limited.
+- `brahma_connect/` contains the new gateway foundation for device pairing, discovery, and routing.
 
 ## Getting Started
 
@@ -150,6 +152,7 @@ start_brahma.vbs
 
 - `config/api_keys.json` — Gemini and OpenRouter credentials
 - `config/app_settings.json` — voice, UI, startup, and automation settings
+- `config/brahma_connect.json` — Brahma Connect gateway host, port, and discovery settings
 - `config/discord_bot.json` — Discord bridge settings
 
 ## Plugin System

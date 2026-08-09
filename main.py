@@ -44,6 +44,14 @@ from actions.website_builder   import website_builder
 from actions.office_builder     import create_presentation, create_spreadsheet
 from actions.docx_tools        import word_document
 from actions.pdf_tools         import create_pdf
+from actions.brahma_connect    import (
+    connect_list_devices,
+    connect_get_device,
+    connect_get_capabilities,
+    connect_execute,
+    connect_pair_device,
+    connect_disconnect_device,
+)
 from PyQt6.QtCore import QTimer
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
@@ -59,6 +67,11 @@ try:
     from dashboard.server import DashboardServer
 except Exception:
     DashboardServer = None
+
+try:
+    from brahma_connect.service import get_service as get_brahma_connect_service
+except Exception:
+    get_brahma_connect_service = None
 
 
 def get_base_dir():
@@ -542,6 +555,112 @@ TOOL_DECLARATIONS = [
                 "command": {"type": "STRING", "description": "Natural language smart-home command"}
             },
             "required": ["command"]
+        }
+    },
+    {
+        "name": "connect_list_devices",
+        "description": (
+            "Lists devices connected to Brahma Connect. Use when the user asks what devices are connected, "
+            "what is online, or wants a simple inventory of paired devices."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "connect_get_device",
+        "description": (
+            "Gets the details for one connected device by name, id, or natural reference such as my phone, "
+            "my laptop, my PC, or my tablet."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device": {"type": "STRING", "description": "Device name, id, or natural reference"},
+                "target": {"type": "STRING", "description": "Alias for device"},
+                "device_id": {"type": "STRING", "description": "Exact device id"},
+                "name": {"type": "STRING", "description": "Exact device name"},
+                "query": {"type": "STRING", "description": "Search query"},
+            },
+            "required": ["device"]
+        }
+    },
+    {
+        "name": "connect_get_capabilities",
+        "description": (
+            "Returns the capabilities and permissions reported by a connected device. "
+            "Use before trying any device command."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device": {"type": "STRING", "description": "Device name, id, or natural reference"},
+                "target": {"type": "STRING", "description": "Alias for device"},
+                "device_id": {"type": "STRING", "description": "Exact device id"},
+                "name": {"type": "STRING", "description": "Exact device name"},
+                "query": {"type": "STRING", "description": "Search query"},
+            },
+            "required": ["device"]
+        }
+    },
+    {
+        "name": "connect_execute",
+        "description": (
+            "Routes a Brahma Connect command to a paired device through the gateway. "
+            "Use for actions such as launch_app, open_url, get_battery, capture_screen, take_photo, "
+            "clipboard_get, clipboard_set, send_file, receive_file, media_play, media_pause, volume_set, "
+            "notification_list, get_device_info, close_app, mouse_move, and keyboard_type. "
+            "Do not execute device operations directly anywhere else."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device": {"type": "STRING", "description": "Target device name, id, or natural reference"},
+                "target": {"type": "STRING", "description": "Alias for device"},
+                "device_id": {"type": "STRING", "description": "Exact device id"},
+                "name": {"type": "STRING", "description": "Exact device name"},
+                "query": {"type": "STRING", "description": "Search query"},
+                "action": {"type": "STRING", "description": "Command to execute on the device"},
+                "parameters": {"type": "OBJECT", "description": "Action parameters"},
+            },
+            "required": ["device", "action"]
+        }
+    },
+    {
+        "name": "connect_pair_device",
+        "description": (
+            "Creates or approves Brahma Connect pairing. Use to generate a QR code / pairing code for a new device, "
+            "or to approve a pending pairing request."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device_name": {"type": "STRING", "description": "Optional device name shown in the pairing flow"},
+                "platform": {"type": "STRING", "description": "android | windows | ios | tablet | other"},
+                "pending_id": {"type": "STRING", "description": "Pending request id to approve"},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "connect_disconnect_device",
+        "description": (
+            "Disconnects a device from Brahma Connect and marks it offline. "
+            "Use when the user asks to disconnect, log out, or stop a paired device."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device": {"type": "STRING", "description": "Target device name, id, or natural reference"},
+                "target": {"type": "STRING", "description": "Alias for device"},
+                "device_id": {"type": "STRING", "description": "Exact device id"},
+                "name": {"type": "STRING", "description": "Exact device name"},
+                "query": {"type": "STRING", "description": "Search query"},
+                "reason": {"type": "STRING", "description": "Optional reason for disconnect"},
+            },
+            "required": ["device"]
         }
     },
     {
@@ -1130,6 +1249,8 @@ class BrahmaLive:
             self.ui.begin_task_workspace(text, _build_task_plan(text), source=source or "local")
         except Exception:
             pass
+        if self._handle_brahma_connect_command(text, source=source or "local"):
+            return
         if self._handle_smart_home_command(text, source=source or "local"):
             return
         if _looks_like_screen_request(text):
@@ -1189,8 +1310,19 @@ class BrahmaLive:
 
     def _handle_smart_home_command(self, text: str, source: str = "local") -> bool:
         normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s%]", " ", text.lower())).strip()
-        smart_home_words = ("fan", "light", "lights", "plug", "switch", "kasa", "atomberg", "room", "bedroom", "living room", "kitchen", "office", "balcony", "bathroom")
+        connect_words = (
+            "phone", "mobile", "android", "tablet", "device", "devices", "brahma connect",
+            "my phone", "my mobile", "my tablet", "my android", "turn on flashlight", "flashlight",
+            "volume", "open url", "launch app", "get battery", "device info",
+        )
+        smart_home_words = (
+            "fan", "light", "lights", "lamp", "plug", "switch", "socket", "bulb",
+            "kasa", "atomberg", "room", "bedroom", "living room", "kitchen", "office",
+            "balcony", "bathroom", "home device", "smart home", "smart-home",
+        )
         action_words = ("turn on", "turn off", "switch on", "switch off", "power on", "power off", "set", "speed", "brightness", "restart", "reboot", "toggle")
+        if any(word in normalized for word in connect_words):
+            return False
         if not any(word in normalized for word in smart_home_words) and not any(word in normalized for word in action_words):
             return False
         try:
@@ -1237,6 +1369,187 @@ class BrahmaLive:
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return True
+
+    def _extract_launch_app_name(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s%]", " ", text.lower())).strip()
+        if not normalized:
+            return ""
+
+        prefixes = (
+            "launch app ",
+            "open app ",
+            "start app ",
+            "open the app ",
+            "launch the app ",
+            "start the app ",
+            "open ",
+            "launch ",
+            "start ",
+            "run ",
+            "bring up ",
+        )
+
+        candidate = normalized
+        for prefix in prefixes:
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):]
+                break
+
+        candidate = re.sub(r"\s+(?:on|in|to)\s+(?:my\s+)?(?:phone|mobile|tablet|android|device)\b.*$", "", candidate).strip()
+        candidate = re.sub(r"\b(?:app|application|please|the)\b", " ", candidate).strip()
+        candidate = re.sub(r"\s+", " ", candidate)
+        return candidate
+
+    def _handle_brahma_connect_command(self, text: str, source: str = "local") -> bool:
+        normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s%]", " ", text.lower())).strip()
+        connect_words = (
+            "phone", "mobile", "android", "tablet", "device", "devices", "brahma connect",
+            "my phone", "my mobile", "my tablet", "my android", "turn on flashlight",
+            "turn off flashlight", "flashlight", "volume", "get battery", "battery", "launch app",
+            "open url", "device info", "my laptop", "my pc", "my computer",
+        )
+        if not any(word in normalized for word in connect_words):
+            return False
+
+        try:
+            devices_json = connect_list_devices(parameters={}, player=self.ui)
+            devices = json.loads(devices_json).get("devices", [])
+        except Exception:
+            devices = []
+
+        if not devices:
+            return False
+
+        try:
+            target = ""
+            for device in devices:
+                name = str(device.get("name", "")).lower()
+                device_id = str(device.get("device_id", "")).lower()
+                platform = str(device.get("platform", "")).lower()
+                if any(token in normalized for token in (name, device_id, platform, "phone", "mobile", "android", "tablet")):
+                    target = str(device.get("device_id") or device.get("name") or "").strip()
+                    break
+            if not target and len(devices) == 1:
+                target = str(devices[0].get("device_id") or devices[0].get("name") or "").strip()
+            if not target:
+                return False
+
+            action = "get_device_info"
+            params: dict[str, object] = {}
+            if "flashlight" in normalized and ("turn on" in normalized or "switch on" in normalized or "power on" in normalized or "on" == normalized):
+                action = "flashlight_on"
+            elif "flashlight" in normalized and ("turn off" in normalized or "switch off" in normalized or "power off" in normalized or "off" == normalized):
+                action = "flashlight_off"
+            elif "battery" in normalized or "charge" in normalized:
+                action = "get_battery"
+            elif "open url" in normalized or "open website" in normalized or "go to" in normalized:
+                action = "open_url"
+            elif any(word in normalized for word in ("launch app", "open app", "start app", "open ", "launch ", "start ", "run ", "bring up ")):
+                app_name = self._extract_launch_app_name(text)
+                if app_name:
+                    action = "launch_app"
+                    params["app_name"] = app_name
+            elif "volume" in normalized and ("set" in normalized or "change" in normalized or "to " in normalized):
+                action = "volume_set"
+                match = re.search(r"\b(\d{1,3})\b", normalized)
+                if match:
+                    params["value"] = int(match.group(1))
+            elif "volume" in normalized:
+                action = "volume_get"
+
+            if action == "launch_app":
+                app_name = str(params.get("app_name") or "").strip()
+                if not app_name:
+                    return False
+            if action == "open_url":
+                m = re.search(r"(https?://\S+)", text, re.IGNORECASE)
+                if m:
+                    params["url"] = m.group(1)
+                else:
+                    return False
+
+            payload = {
+                "device": target,
+                "action": action,
+                "parameters": params,
+            }
+            result_json = connect_execute(parameters=payload, player=self.ui)
+            result = json.loads(result_json)
+            if result.get("success", False):
+                detail = str(result.get("detail") or result.get("error") or "Device command completed.")
+                title = f"Brahma Connect: {action}"
+                self.ui.update_task_workspace(
+                    title=title,
+                    command=text,
+                    plan=[
+                        "Identify the paired phone or device",
+                        "Route the command through Brahma Connect",
+                        "Verify the device response",
+                        "Report the result",
+                    ],
+                    status="Executing device command",
+                    output=detail,
+                    percent=100,
+                    source=source,
+                )
+                self.ui.write_log(f"Brahma Echo: {detail}")
+                self.speak(detail)
+                if not self.ui.muted:
+                    self.ui.set_state("LISTENING")
+                return True
+
+            self.ui.write_log(f"ERR: Brahma Connect command failed: {result.get('error') or 'Unknown error'}")
+            return False
+        except Exception:
+            return False
+
+    def _connect_tool_voice(self, name: str, raw_result: str) -> str | None:
+        if not str(name or "").startswith("connect_"):
+            return None
+        try:
+            data = json.loads(raw_result) if isinstance(raw_result, str) else dict(raw_result or {})
+        except Exception:
+            data = {}
+
+        if name == "connect_list_devices":
+            count = int(data.get("count") or len(data.get("devices") or []))
+            return f"I found {count} connected device{'s' if count != 1 else ''}."
+
+        if name == "connect_get_device":
+            device = data.get("device") or {}
+            label = str(device.get("name") or "the device")
+            status = "online" if device.get("online") else "offline"
+            return f"{label} is {status}."
+
+        if name == "connect_get_capabilities":
+            device = data.get("device") or {}
+            label = str(device.get("name") or "The device")
+            return f"{label} capabilities are ready."
+
+        if name == "connect_pair_device":
+            pairing = data.get("pairing") or data
+            code = str(pairing.get("pairing_code") or "").strip()
+            if code:
+                return f"Pairing code ready: {code}."
+            return "Pairing is ready."
+
+        if name == "connect_disconnect_device":
+            return "The device has been disconnected."
+
+        if name == "connect_execute":
+            if data.get("success", False):
+                detail = data.get("detail")
+                if isinstance(detail, dict):
+                    detail = detail.get("message") or detail.get("status") or detail.get("result")
+                if not detail and isinstance(data.get("data"), dict):
+                    payload = data.get("data") or {}
+                    detail = payload.get("message") or payload.get("status") or payload.get("result")
+                if not detail:
+                    detail = data.get("error") or "Task completed."
+                return str(detail)
+            return str(data.get("error") or "The device command failed.")
+
+        return None
 
     def _attention_message(self, event: dict) -> str:
         app = (event.get("app") or "an app").strip()
@@ -1821,6 +2134,24 @@ class BrahmaLive:
             elif name == "flight_finder":
                 r = await loop.run_in_executor(None, lambda: flight_finder(parameters=args, player=self.ui))
                 result = r or "Done."
+            elif name == "connect_list_devices":
+                r = await loop.run_in_executor(None, lambda: connect_list_devices(parameters=args, player=self.ui))
+                result = r or "Done."
+            elif name == "connect_get_device":
+                r = await loop.run_in_executor(None, lambda: connect_get_device(parameters=args, player=self.ui))
+                result = r or "Done."
+            elif name == "connect_get_capabilities":
+                r = await loop.run_in_executor(None, lambda: connect_get_capabilities(parameters=args, player=self.ui))
+                result = r or "Done."
+            elif name == "connect_execute":
+                r = await loop.run_in_executor(None, lambda: connect_execute(parameters=args, player=self.ui))
+                result = r or "Done."
+            elif name == "connect_pair_device":
+                r = await loop.run_in_executor(None, lambda: connect_pair_device(parameters=args, player=self.ui))
+                result = r or "Done."
+            elif name == "connect_disconnect_device":
+                r = await loop.run_in_executor(None, lambda: connect_disconnect_device(parameters=args, player=self.ui))
+                result = r or "Done."
             elif name == "shutdown_brahma":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir.")
@@ -1843,6 +2174,17 @@ class BrahmaLive:
             self.ui.finish_task_workspace(result, "Task completed.", 100)
         except Exception:
             pass
+
+        tool_voice = self._connect_tool_voice(name, result)
+        if tool_voice:
+            try:
+                self.ui.write_log(f"Brahma Echo: {tool_voice}")
+            except Exception:
+                pass
+            try:
+                self.speak(tool_voice)
+            except Exception:
+                pass
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -2150,6 +2492,47 @@ def main():
 
         threading.Thread(target=_start_dashboard_server, daemon=True).start()
         _startup_log("dashboard thread spawned")
+
+    brahma_connect = None
+    brahma_connect_enabled = False
+    if get_brahma_connect_service is not None:
+        try:
+            brahma_connect = get_brahma_connect_service(BASE_DIR)
+            brahma_connect_enabled = bool(brahma_connect.gateway.config.enabled)
+        except Exception as exc:
+            _startup_log(f"brahma connect init failed: {exc}")
+            try:
+                ui.write_log(f"ERR: Brahma Connect failed to initialize: {exc}")
+            except Exception:
+                pass
+            brahma_connect = None
+    try:
+        if brahma_connect is not None and hasattr(ui, "set_brahma_connect_service"):
+            ui.set_brahma_connect_service(brahma_connect)
+    except Exception:
+        pass
+    if brahma_connect is not None and brahma_connect_enabled:
+        connect_port = int(getattr(brahma_connect.gateway.config, "port", 8765))
+        if _is_port_in_use(connect_port):
+            _startup_log(f"brahma connect disabled: port {connect_port} already in use")
+            try:
+                ui.write_log(f"SYS: Brahma Connect is already running on port {connect_port}.")
+            except Exception:
+                pass
+        else:
+            def _start_brahma_connect_server():
+                try:
+                    _startup_log("brahma connect thread started")
+                    brahma_connect.start_background()
+                    _startup_log("brahma connect thread spawned")
+                except Exception as exc:
+                    _startup_log(f"brahma connect thread error: {exc}")
+                    try:
+                        ui.write_log(f"ERR: Brahma Connect server failed: {exc}")
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_start_brahma_connect_server, daemon=True).start()
 
     ui.show_main()
     _startup_log("ui shown")
