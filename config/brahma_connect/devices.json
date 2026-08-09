@@ -1,0 +1,33 @@
+{
+  "devices": {
+    "android_f4cd46": {
+      "device_id": "android_f4cd46",
+      "name": "M2012K11I",
+      "platform": "android",
+      "os_version": "14",
+      "agent_version": "1.0.0",
+      "ip": "192.168.0.113",
+      "online": false,
+      "last_seen": "2026-08-09T13:52:18.455623+00:00",
+      "battery": 74,
+      "capabilities": [
+        "device_info",
+        "battery",
+        "flashlight",
+        "volume",
+        "media",
+        "launch_app",
+        "apps",
+        "open_url",
+        "wifi_state"
+      ],
+      "permissions": [],
+      "paired_at": "2026-08-09T13:52:07.584614+00:00",
+      "secret_hash": "32906e8ea34d51a7f353865d32c3e13ffe6ee8b855d80295349a79556eb735ca",
+      "revoked": false,
+      "connection_id": "",
+      "identity_fingerprint": "dea2f99b0fdafcf5",
+      "metadata": {}
+    }
+  }
+}
