@@ -15,6 +15,7 @@ import re
 import secrets
 import socket
 import string
+import sys
 import time
 from pathlib import Path
 
@@ -36,7 +37,18 @@ except Exception:
     pass
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
-STATIC_DIR  = Path(__file__).parent / "static"
+
+def _get_static_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        candidate = Path(sys._MEIPASS) / "dashboard" / "static"
+        if candidate.exists():
+            return candidate
+        candidate = Path(sys._MEIPASS) / "static"
+        if candidate.exists():
+            return candidate
+    return Path(__file__).resolve().parent / "static"
+
+STATIC_DIR  = _get_static_dir()
 PORT        = 8000
 MAX_UPLOAD_MB = 500
 
