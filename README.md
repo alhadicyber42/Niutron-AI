@@ -1,92 +1,97 @@
-<p align="center">
-  <img src="assets/Brahma_Lite_Logo.png" alt="Brahma AI - Lite" width="260" />
-</p>
+<div align="center">
+  <img src="assets/Brahma_Lite_Logo.png" alt="Brahma Echo" width="260" />
 
-<h1 align="center">Brahma AI - Lite</h1>
+  <h1>Brahma Echo</h1>
 
-<p align="center">
-  <strong>Open-source Windows desktop AI assistant</strong> for voice, automation, productivity, and intelligent workflows.
-</p>
+  <p><strong>Open-source Windows desktop AI assistant</strong></p>
+  <p>Voice-first automation · contextual desktop intelligence · productivity workflows</p>
 
-<p align="center">
-  <a href="#overview"><img src="https://img.shields.io/badge/experience-open%20source-blue?style=for-the-badge" alt="Open Source Experience" /></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey?style=for-the-badge" alt="Windows" /></a>
-  <a href="#how-it-works"><img src="https://img.shields.io/badge/ai-voice%20%2B%20automation-green?style=for-the-badge" alt="AI + Automation" /></a>
-</p>
+  <p>
+    <a href="#overview"><img src="https://img.shields.io/badge/experience-open%20source-blue?style=for-the-badge" alt="Open Source" /></a>
+    <a href="#getting-started"><img src="https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey?style=for-the-badge" alt="Windows" /></a>
+    <a href="#features"><img src="https://img.shields.io/badge/tech-Gemini%20%2B%20OpenRouter-green?style=for-the-badge" alt="Gemini + OpenRouter" /></a>
+  </p>
+
+  <p>
+    <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-Install%20%26%20Run-success?style=flat-square" alt="Quick Start" /></a>
+    <a href="#project-structure"><img src="https://img.shields.io/badge/Project%20Structure-Clean%20Architecture-lightgrey?style=flat-square" alt="Project Structure" /></a>
+    <a href="#community"><img src="https://img.shields.io/badge/Community-Discord-purple?style=flat-square" alt="Community" /></a>
+  </p>
+</div>
 
 ---
 
 ## Overview
 
-Brahma AI - Lite is an open-source desktop assistant designed for Windows power users. It unites voice and text input with intelligent automation, productivity workflows, document generation, and adaptive screen-aware actions.
+Brahma Echo is a premium Windows desktop assistant that combines voice and text control with automated workflows, screen-aware intelligence, and rich content generation.
 
-- Live voice and text interaction via Gemini with OpenRouter fallback
-- Automatic daily briefing with interruption-aware audio playback
-- Desktop automation for apps, windows, files, and browser workflows
-- Office content generation for PowerPoint, Word, spreadsheets, and PDF
-- Built-in website and workspace creation through Brahma's local workspace generator
-- Discord collaboration, reminders, meeting assistant, and notifications
+Designed for advanced desktop productivity, Brahma Echo delivers:
 
-## Why It Stands Out
+- Voice-first command and desktop automation
+- Application control, browser workflows, and file handling
+- Contextual screen inspection and adaptive task execution
+- Presentation, document, and report generation
+- Remote control via Discord and Brahma Connect
 
-- Responsive UI with rich task/workspace feedback
-- Seamless AI and voice integration for desktop productivity
-- Modular tool-driven architecture for clean extension
-- Robust fallback handling to keep the assistant available
-- Local-first configuration with secure credentials storage
+## Quick Highlights
+
+| Core capability | Why it matters |
+|---|---|
+| Voice-first assistant | Speak commands naturally and stay hands-free |
+| Gemini + OpenRouter | Fast responses with resilient fallback support |
+| Screen-aware context | Ask about visible windows and on-screen content |
+| Document automation | Create presentations, docs, spreadsheets, and PDFs |
+| Plugin-ready | Extend features with lightweight Python plugins |
+
+## Key Benefits
+
+- Wake-word support for “Brahma Echo” and responsive assistant activation
+- Gemini 2.5 Flash-powered AI with OpenRouter fallback resilience
+- Polished Qt interface with live status displays and workflow cards
+- Modular action architecture for clean extensibility and automation
+- Secure local configuration with file-based credential storage
+- Device pairing and remote routing through Brahma Connect
 
 ## Features
 
 ### Intelligent Assistant
 
-- Unified voice + typed conversation experience
-- Startup daily briefing with Edge TTS delivery
-- Instant briefing interruption when a new message arrives
-- Gemini-first live AI with OpenRouter fallback support
+- Unified voice and typed command handling
+- Wake-word listening and responsive assistant activation
+- Dynamic screen inspection for context-aware answers
+- Automatic briefings with Edge TTS playback
+- Gemini-first AI with OpenRouter fallback resilience
 
-### Automation & Productivity
+### Productivity & Automation
 
-- Open and control Windows applications and system actions
-- Browser automation with Playwright for web workflows
-- Screen inspection and contextual content extraction
-- File and document automation for fast productivity
+- Open and control Windows apps, windows, files, and system actions
+- Browser automation with Playwright-driven workflows
+- Contextual automation based on screen content and notifications
+- Reminder, meeting assistance, and notification management
 
-### Office & Content Tools
+### Content & Office Tools
 
-- Generate PowerPoint decks and presentation content
-- Create spreadsheets and Word documents quickly
-- Export polished reports as PDF files
-- Build landing pages and websites from within the app
+- Generate presentation decks, summaries, and slide content
+- Create Word documents and spreadsheets from prompts
+- Export polished reports and deliverables as PDF
+- Build landing pages and website workspaces locally
 
 ### Integrations
 
-- Discord bridge for remote commands and chat
-- Local credential management for Gemini and OpenRouter
-- Configurable voice, notifications, startup, and UI preferences
-- Brahma Connect foundation for local multi-device pairing and command routing
-
-## How It Works
-
-Brahma AI - Lite is built on a layered desktop architecture that separates UI, AI session management, and tool execution.
-
-- `main.py` initializes the application, launches the UI, and manages the AI runtime.
-- `BrahmaLive` owns the live AI session, audio queues, and command routing.
-- `actions/` contains modular tools for automation, document generation, notifications, meetings, and search.
-- `AttentionMonitor` captures external events and notification text, then speaks alerts using Edge TTS.
-- `daily_briefing.py` constructs the morning briefing text and triggers playback after startup.
-- `ui.py` provides a polished Qt-based interface with command entry, workspace cards, and status feedback.
-- `or_client.py` provides OpenRouter fallback support when Gemini is unavailable or rate-limited.
-- `brahma_connect/` contains the new gateway foundation for device pairing, discovery, and routing.
+- Discord bridge for remote commands and collaboration
+- OpenRouter fallback for uninterrupted AI access
+- Configurable voice, UI, startup, and notification settings
+- Brahma Connect for device discovery and command routing
 
 ## Getting Started
 
 ### Prerequisites
 
 - Windows 10 or Windows 11
-- Python 3.11 or 3.12
+- Python 3.11 or Python 3.12
 - Git installed
 - Gemini API key
-- OpenRouter API key (optional, recommended for fallback resilience)
+- OpenRouter API key (optional but recommended)
 
 ### 1. Clone the repository
 
@@ -95,7 +100,7 @@ git clone https://github.com/titechprabhasolutions/Brahma-AI---Lite.git
 cd "Brahma AI - Lite"
 ```
 
-### 2. Create a virtual environment
+### 2. Create and activate a virtual environment
 
 ```powershell
 python -m venv .venv
@@ -109,9 +114,9 @@ pip install -r requirements.txt
 playwright install
 ```
 
-### 4. Configure API keys
+### 4. Configure API credentials
 
-The app loads keys from `config/api_keys.json`. Create this file if it does not already exist.
+Create `config/api_keys.json` with your keys:
 
 ```json
 {
@@ -122,27 +127,27 @@ The app loads keys from `config/api_keys.json`. Create this file if it does not 
 
 #### Gemini API Key
 
-- Create a Google Cloud or Gemini account
-- Enable Gemini API access for your project
-- Generate an API key and add it under `gemini_api_key`
+1. Create a Google Cloud or Gemini account.
+2. Enable Gemini API access for your project.
+3. Add the generated key to `gemini_api_key`.
 
-#### OpenRouter API Key (recommended)
+#### OpenRouter API Key
 
-- Register at https://openrouter.ai
-- Generate an `sk-or-` API key
-- Add it under `openrouter_api_key`
+1. Register at https://openrouter.ai.
+2. Generate an `sk-or-` API key.
+3. Add the key to `openrouter_api_key`.
 
 ### 5. Optional: Configure Discord integration
 
-To enable Discord bridging, populate `config/discord_bot.json` with your bot credentials and connection settings.
+If you want Discord remote control, populate `config/discord_bot.json` with your bot credentials and connection settings.
 
-### 6. Start the app
+### 6. Launch Brahma Echo
 
 ```powershell
 python main.py
 ```
 
-For a cleaner Windows launch without console output:
+For a cleaner startup experience on Windows:
 
 ```powershell
 start_brahma.vbs
@@ -150,53 +155,50 @@ start_brahma.vbs
 
 ## Configuration
 
+Core configuration files:
+
 - `config/api_keys.json` — Gemini and OpenRouter credentials
-- `config/app_settings.json` — voice, UI, startup, and automation settings
-- `config/brahma_connect.json` — Brahma Connect gateway host, port, and discovery settings
-- `config/discord_bot.json` — Discord bridge settings
-
-## Plugin System
-
-You can extend Brahma AI with lightweight Python plugins placed in the `plugins/` folder. Plugins are simple `*.py` files that export one or more hook functions:
-
-- `on_brahma_created(brahma)` — called when the `BrahmaLive` instance is created
-- `on_startup(brahma)` — called once during app startup after plugins are registered
-- `on_text_command(text, source, brahma=None)` — called for each incoming text command; return `True` to mark the command handled and stop further processing
-
-Example: `plugins/example_plugin.py` demonstrates the hooks.
-
-To enable plugins, simply drop your plugin file into the `plugins/` folder and restart the app. The launcher and `main.py` load plugins automatically.
+- `config/app_settings.json` — voice, UI, startup, and automation preferences
+- `config/brahma_connect.json` — device pairing, gateway, and discovery settings
+- `config/discord_bot.json` — Discord bridge configuration
 
 ## Project Structure
 
-- `main.py` — core runtime, AI session orchestration, and startup flow
-- `ui.py` — polished Qt interface, workspace cards, and controls
-- `actions/` — modular tools for automation and AI workflows
-- `config/` — local settings, API keys, and runtime configuration
-- `tests/` — validation and integration tests for core features
+- `main.py` — application startup, AI orchestration, and command routing
+- `ui.py` — Qt-based desktop interface and live assistant controls
+- `actions/` — modular automation, document, and assistant tools
+- `brahma_connect/` — local gateway, pairing, and remote routing
+- `config/` — local settings, credentials, and runtime configuration
+- `plugins/` — optional plugin extensions
+- `tests/` — integration and validation tests
 
-## Recent Updates
+## Plugin System
 
-### 2026-07-19
+Extend Brahma Echo with custom Python plugins by adding files to `plugins/`.
 
-- Restored automatic daily briefing playback at startup.
-- Unified local TTS output to the same Edge voice.
-- Added briefing interruption support for immediate user response.
-- Redesigned gesture HUD for hand landmark control.
-- Improved cursor mapping for better desktop reach and direction.
-- Added idle speech prompts for proactive engagement.
-- Tightened the developer workflow so Brahma uses the local workspace generator for websites and keeps coding tasks in the main app flow.
+Supported hooks:
 
-## Community
+- `on_brahma_created(brahma)` — called when the assistant instance is initialized
+- `on_startup(brahma)` — called after startup when plugins are registered
+- `on_text_command(text, source, brahma=None)` — called for each incoming text command; return `True` to indicate the command was handled
+
+## Best Practices
+
+- Keep credentials in `config/api_keys.json` and avoid committing secrets.
+- Use the virtual environment for all development and runtime sessions.
+- Restart the app after changing config or adding plugins.
+- Review `config/app_settings.json` to tune voice, UI, and automation behavior.
+
+## Community & Support
 
 - Discord: https://discord.gg/gEYmJKKtq3
 
 ## License
 
-This project is licensed under a custom source-available license. See `LICENSE` for full terms and `TRADEMARK.md` for branding details.
+This project is published under a custom source-available license. See `LICENSE` for details.
 
-## Maintained by
+## Maintainer
 
 - Suryaansh Tiwari
 
-Please preserve attribution and keep credentials secure when building on top of Brahma AI - Lite.
+> Preserve attribution and keep credentials secure when building on top of Brahma Echo.
