@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Niutron VRM Avatar - Simple</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            background: transparent;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffaa30;
+            font-size: 18px;
+            text-align: center;
+            z-index: 10;
+            display: none;
+        }
+        
+        .loading-spinner {
+            border: 4px solid rgba(255, 170, 48, 0.2);
+            border-top: 4px solid #ffaa30;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        #status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 12px;
+            border-radius: 4px;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="vrm-canvas"></canvas>
+        <div id="loading">
+            <div class="loading-spinner"></div>
+            <div>Memuat Avatar VRM...</div>
+        </div>
+        <div id="status">Menginisialisasi...</div>
+    </div>
+
+    <!-- Three.js r149 - Last version with good global support -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/@pixiv/three-vrm@1.0.0/lib/three-vrm.js"></script>
+
+    <script>
+        console.log('=== NIUTRON VRM VIEWER - SIMPLE VERSION ===');
+        
+        // Check dependencies
+        const hasThree = typeof THREE !== 'undefined';
+        const hasGLTF = hasThree && typeof THREE.GLTFLoader !== 'undefined';
+        const hasOrbit = hasThree && typeof THREE.OrbitControls !== 'undefined';
+        const hasVRM = typeof THREE.VRM !== 'undefined';
+        
+        console.log('✓ THREE:', hasThree);
+        console.log('✓ GLTFLoader:', hasGLTF);
+        console.log('✓ OrbitControls:', hasOrbit);
+        console.log('✓ VRM:', hasVRM);
+        
+        // Log what's actually available
+        if (hasThree) {
+            console.log('THREE.GLTFLoader type:', typeof THREE.GLTFLoader);
+            console.log('THREE keys sample:', Object.keys(THREE).slice(0, 10));
+        }
+        
+        if (!hasThree) {
+            document.getElementById('status').textContent = '❌ THREE.js not loaded';
+            console.error('THREE.js not loaded!');
+        }
+
+        // Get VRM namespace
+        const VRM = THREE.VRM;
+        
+        // Global variables
+        let scene, camera, renderer, controls, clock;
+        let currentVRM = null;
+        let mixer = null;
+
+        function init() {
+            console.log('[INIT] Starting scene setup...');
+            
+            try {
+                const canvas = document.getElementById('vrm-canvas');
+                const container = document.getElementById('canvas-container');
+
+                // Clock
+                clock = new THREE.Clock();
+
+                // Scene
+                scene = new THREE.Scene();
+                scene.background = null; // Transparent
+                console.log('[INIT] ✓ Scene created');
+
+                // Camera
+                camera = new THREE.PerspectiveCamera(
+                    30,
+                    container.clientWidth / container.clientHeight,
+                    0.1,
+                    20
+                );
+                camera.position.set(0.0, 1.4, 2.0);
+                console.log('[INIT] ✓ Camera created');
+
+                // Renderer
+                renderer = new THREE.WebGLRenderer({ 
+                    canvas: canvas,
+                    alpha: true,
+                    antialias: true
+                });
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                console.log('[INIT] ✓ Renderer created');
+
+                // Lights
+                const light = new THREE.DirectionalLight(0xffffff);
+                light.position.set(1.0, 1.0, 1.0).normalize();
+                scene.add(light);
+                
+                const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+                scene.add(ambient);
+                console.log('[INIT] ✓ Lights added');
+
+                // Controls
+                controls = new THREE.OrbitControls(camera, canvas);
+                controls.screenSpacePanning = true;
+                controls.target.set(0.0, 1.4, 0.0);
+                controls.update();
+                console.log('[INIT] ✓ Controls created');
+
+                // Window resize
+                window.addEventListener('resize', onWindowResize, false);
+
+                // Start render loop
+                animate();
+                
+                document.getElementById('status').textContent = '✓ Siap memuat VRM';
+                console.log('[INIT] ✓ Initialization complete!');
+                
+            } catch (error) {
+                console.error('[INIT] ❌ Error:', error);
+                document.getElementById('status').textContent = '❌ Initialization failed';
+            }
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const deltaTime = clock.getDelta();
+            
+            // Update controls
+            if (controls) {
+                controls.update();
+            }
+
+            // Update VRM
+            if (currentVRM) {
+                currentVRM.update(deltaTime);
+            }
+
+            // Update animations
+            if (mixer) {
+                mixer.update(deltaTime);
+            }
+
+            // Render
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        async function loadVRM(url) {
+            const loadingEl = document.getElementById('loading');
+            const statusEl = document.getElementById('status');
+            
+            loadingEl.style.display = 'block';
+            statusEl.textContent = 'Memuat VRM...';
+            
+            console.log('[LOAD] Loading VRM from:', url);
+            console.log('[LOAD] THREE.GLTFLoader type:', typeof THREE.GLTFLoader);
+
+            try {
+                // Create loader - use global THREE.GLTFLoader from examples/js
+                let loader;
+                
+                // Try different ways to access GLTFLoader
+                if (typeof THREE.GLTFLoader === 'function') {
+                    loader = new THREE.GLTFLoader();
+                    console.log('[LOAD] ✓ Using THREE.GLTFLoader');
+                } else if (typeof GLTFLoader === 'function') {
+                    loader = new GLTFLoader();
+                    console.log('[LOAD] ✓ Using global GLTFLoader');
+                } else {
+                    throw new Error('GLTFLoader not available');
+                }
+                
+                loader.crossOrigin = 'anonymous';
+                
+                console.log('[LOAD] Fetching GLTF...');
+                
+                // Load with callback (more compatible than async)
+                loader.load(
+                    url,
+                    (gltf) => {
+                        console.log('[LOAD] ✓ GLTF loaded');
+                        console.log('[LOAD] GLTF userData:', gltf.userData);
+                        
+                        // Get VRM - try different ways
+                        let vrmPromise;
+                        
+                        if (THREE.VRM && typeof THREE.VRM.from === 'function') {
+                            console.log('[LOAD] Using THREE.VRM.from()');
+                            vrmPromise = THREE.VRM.from(gltf);
+                        } else if (VRM && typeof VRM.from === 'function') {
+                            console.log('[LOAD] Using VRM.from()');
+                            vrmPromise = VRM.from(gltf);
+                        } else if (gltf.userData.vrm) {
+                            console.log('[LOAD] VRM already in userData');
+                            vrmPromise = Promise.resolve(gltf.userData.vrm);
+                        } else {
+                            throw new Error('No VRM conversion method available');
+                        }
+                        
+                        vrmPromise.then((vrm) => {
+                            console.log('[LOAD] ✓ VRM created:', vrm);
+                            
+                            // Remove old VRM
+                            if (currentVRM) {
+                                scene.remove(currentVRM.scene);
+                                if (THREE.VRM && THREE.VRM.VRMUtils) {
+                                    THREE.VRM.VRMUtils.deepDispose(currentVRM.scene);
+                                }
+                            }
+                            
+                            // Store and add new VRM
+                            currentVRM = vrm;
+                            
+                            // Rotate to face camera
+                            vrm.scene.rotation.y = Math.PI;
+                            
+                            // Add to scene
+                            scene.add(vrm.scene);
+                            
+                            console.log('[LOAD] ✓ VRM added to scene');
+                            console.log('[LOAD] VRM scene children:', vrm.scene.children.length);
+                            
+                            // Setup mixer
+                            mixer = new THREE.AnimationMixer(vrm.scene);
+                            
+                            // Hide loading
+                            loadingEl.style.display = 'none';
+                            statusEl.textContent = '✓ VRM dimuat: ' + url.split('/').pop();
+                            
+                            console.log('[LOAD] ✓✓✓ SUCCESS! VRM is now visible');
+                        }).catch((error) => {
+                            console.error('[LOAD] ❌ VRM conversion error:', error);
+                            loadingEl.style.display = 'none';
+                            statusEl.textContent = '❌ VRM conversion failed';
+                        });
+                    },
+                    (progress) => {
+                        if (progress.total > 0) {
+                            const percent = Math.round((progress.loaded / progress.total) * 100);
+                            console.log('[LOAD] Progress:', percent + '%');
+                            statusEl.textContent = 'Memuat... ' + percent + '%';
+                        }
+                    },
+                    (error) => {
+                        console.error('[LOAD] ❌ Error:', error);
+                        loadingEl.style.display = 'none';
+                        statusEl.textContent = '❌ Gagal memuat VRM';
+                    }
+                );
+                
+            } catch (error) {
+                console.error('[LOAD] ❌ Exception:', error);
+                loadingEl.style.display = 'none';
+                statusEl.textContent = '❌ Error: ' + error.message;
+            }
+        }
+
+        function setExpression(name, value) {
+            if (!currentVRM || !currentVRM.expressionManager) return;
+            
+            try {
+                currentVRM.expressionManager.setValue(name, value);
+            } catch (e) {
+                console.warn('[EXPR] Not found:', name);
+            }
+        }
+
+        function updateLipSync(level) {
+            if (!currentVRM) return;
+            
+            // Simple mouth movement
+            const vowels = ['aa', 'ih', 'ou', 'ee', 'oh'];
+            const vowel = vowels[Math.floor(Math.random() * vowels.length)];
+            
+            if (level > 0) {
+                setExpression(vowel, level);
+            } else {
+                vowels.forEach(v => setExpression(v, 0));
+            }
+        }
+
+        function setMood(mood, intensity = 1.0) {
+            if (!currentVRM || !currentVRM.expressionManager) return;
+            
+            // Reset all
+            const expressions = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'relaxed'];
+            expressions.forEach(exp => setExpression(exp, 0));
+            
+            // Set mood
+            setExpression(mood, intensity);
+        }
+
+        function lookAt(x, y, z) {
+            if (!currentVRM || !currentVRM.lookAt) return;
+            currentVRM.lookAt.target.set(x, y, z);
+        }
+
+        function playAnimation(name) {
+            console.log('[ANIM] Play:', name);
+            // TODO: Load and play VRMA animations
+        }
+
+        function getStatus() {
+            return currentVRM ? 'loaded' : 'empty';
+        }
+
+        // ======================
+        // API FOR PYTHON
+        // ======================
+        window.vrmAPI = {
+            loadVRM: loadVRM,
+            setExpression: setExpression,
+            setMood: setMood,
+            updateLipSync: updateLipSync,
+            lookAt: lookAt,
+            playAnimation: playAnimation,
+            getStatus: getStatus
+        };
+        
+        console.log('[API] ✓ window.vrmAPI registered');
+        console.log('[API] Available methods:', Object.keys(window.vrmAPI));
+
+        // Auto-initialize when ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+        
+        console.log('=== VRM VIEWER SCRIPT LOADED ===');
+    </script>
+</body>
+</html>

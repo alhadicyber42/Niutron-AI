@@ -1,0 +1,294 @@
+/**
+ * Web Speech API TTS — browser-native, no API key needed.
+ * Used as fallback for free users or when ElevenLabs is unavailable.
+ */
+
+import { getActiveModelGender } from '@/lib/vits-tts';
+
+export function isWebSpeechTTSSupported(): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+}
+
+let _currentUtterance: SpeechSynthesisUtterance | null = null;
+
+// ── Procedural lip-sync for Web Speech ───────────────────────────────────────
+// Simulates realistic speech rhythm: syllable bursts, inter-word pauses,
+// consonant closures, and natural amplitude variation.
+
+let _lipSyncActive = false;
+let _lipSyncTimer  = 0;
+let _lipSyncLevel  = 0;
+
+// Syllable burst state
+let _syllablePhase   = 0;   // 0 = open, 1 = closing, 2 = closed (consonant)
+let _syllableTimer   = 0;
+let _syllableDur     = 0.10; // current syllable open duration
+let _closureDur      = 0.04; // consonant closure duration
+let _nextSyllableDur = 0.10;
+let _syllablePeak    = 0.75; // amplitude of current syllable
+let _wordPause       = 0;    // remaining pause between words
+let _wordPauseActive = false;
+
+function _rng(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+function _scheduleSyllable(): void {
+  // Syllable open: 80–180ms, peak amplitude varies per syllable
+  _syllableDur  = _rng(0.08, 0.18);
+  _closureDur   = _rng(0.03, 0.07); // brief consonant closure
+  _syllablePeak = _rng(0.55, 1.0);  // stressed vs unstressed syllable
+  _syllableTimer = 0;
+  _syllablePhase = 0;
+
+  // ~20% chance of a word-boundary pause after this syllable (100–300ms)
+  if (Math.random() < 0.20) {
+    _wordPause = _rng(0.10, 0.30);
+    _wordPauseActive = true;
+  } else {
+    _wordPauseActive = false;
+  }
+}
+
+export function getWebSpeechLipLevel(delta: number): number {
+  if (!_lipSyncActive) {
+    // Smooth decay to zero when speech ends
+    _lipSyncLevel *= Math.pow(0.85, delta / 0.016);
+    return Math.max(_lipSyncLevel, 0);
+  }
+
+  _lipSyncTimer += delta;
+  _syllableTimer += delta;
+
+  let target = 0;
+
+  if (_wordPauseActive) {
+    // Inter-word pause: mouth nearly closed
+    _wordPause -= delta;
+    target = _rng(0.0, 0.05); // tiny residual movement
+    if (_wordPause <= 0) {
+      _wordPauseActive = false;
+      _scheduleSyllable();
+    }
+  } else {
+    if (_syllablePhase === 0) {
+      // Opening / open phase — smooth rise then hold
+      const t = Math.min(_syllableTimer / _syllableDur, 1.0);
+      // Ease-in-out curve: fast open, hold at peak
+      const curve = t < 0.4
+        ? (t / 0.4) * (t / 0.4)          // fast open
+        : 1.0 - Math.pow((t - 0.4) / 0.6, 2) * 0.15; // slight droop at end
+      target = curve * _syllablePeak;
+
+      if (_syllableTimer >= _syllableDur) {
+        _syllablePhase = 1;
+        _syllableTimer = 0;
+      }
+    } else {
+      // Closure phase — mouth snaps shut for consonant
+      const t = Math.min(_syllableTimer / _closureDur, 1.0);
+      target = _syllablePeak * (1.0 - t) * 0.25;
+
+      if (_syllableTimer >= _closureDur) {
+        _scheduleSyllable();
+      }
+    }
+  }
+
+  // Add subtle high-frequency micro-tremor (vocal cord vibration feel)
+  const tremor = Math.sin(_lipSyncTimer * Math.PI * 28.0) * 0.03;
+  target = Math.max(0, target + tremor);
+
+  // Asymmetric smoothing: fast open, slow close (natural jaw physics)
+  const smoothing = target > _lipSyncLevel ? 0.35 : 0.12;
+  _lipSyncLevel += (target - _lipSyncLevel) * smoothing;
+
+  return Math.min(Math.max(_lipSyncLevel, 0), 1.0);
+}
+
+export function startWebSpeechLipSync(): void {
+  _lipSyncActive = true;
+  _lipSyncTimer  = 0;
+  _lipSyncLevel  = 0;
+  _scheduleSyllable();
+}
+export function stopWebSpeechLipSync(): void { _lipSyncActive = false; }
+
+export interface WebSpeechTTSOptions {
+  lang?: string;
+  rate?: number;
+  pitch?: number;
+  volume?: number;
+  voiceURI?: string;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (e: SpeechSynthesisErrorEvent | { error: string }) => void;
+}
+
+// ── Voice gender heuristic & listing ─────────────────────────────────────────
+export type VoiceGender = 'male' | 'female' | 'unknown';
+
+const MALE_RX = /\b(male|man|pria|laki|guy|david|mark|alex|daniel|james|john|tom|paul|peter|matthew|fred|reed|aaron|arthur|albert|ralph|hugo|diego|jorge|felipe|santiago|kenji|hiroshi|takeshi|google.*\bmale\b|microsoft.*\b(?:david|mark|guy|paul|james|ravi|hortense|claude|paul|thomas|stefan)\b)/i;
+const FEMALE_RX = /\b(female|woman|wanita|perempuan|sarah|lily|alice|samantha|victoria|karen|moira|tessa|fiona|susan|allison|ava|zira|hazel|catherine|linda|heather|julie|mia|emma|sofia|isabella|maria|laura|ana|kyoko|haruka|hannah|elsa|anna|google.*\bfemale\b|microsoft.*\b(?:zira|hazel|heera|catherine|susan|linda|julie|hortense|sabina|hedda|katja|paulina|elsa|helena)\b)/i;
+
+export function detectVoiceGender(name: string): VoiceGender {
+  if (FEMALE_RX.test(name)) return 'female';
+  if (MALE_RX.test(name)) return 'male';
+  return 'unknown';
+}
+
+export interface WebSpeechVoiceInfo {
+  voiceURI: string;
+  name: string;
+  lang: string;
+  gender: VoiceGender;
+  localService: boolean;
+  default: boolean;
+}
+
+export function listWebSpeechVoices(): WebSpeechVoiceInfo[] {
+  if (!isWebSpeechTTSSupported()) return [];
+  const voices = window.speechSynthesis.getVoices();
+  return voices.map((v) => ({
+    voiceURI: v.voiceURI,
+    name: v.name,
+    lang: v.lang,
+    gender: detectVoiceGender(v.name),
+    localService: v.localService,
+    default: v.default,
+  }));
+}
+
+const VOICE_STORAGE_KEY = 'vrm.webspeech_voice';
+const PITCH_STORAGE_KEY = 'vrm.webspeech_pitch';
+const RATE_STORAGE_KEY = 'vrm.webspeech_rate';
+
+export function setWebSpeechVoice(voiceURI: string | null): void {
+  try {
+    if (voiceURI) localStorage.setItem(VOICE_STORAGE_KEY, voiceURI);
+    else localStorage.removeItem(VOICE_STORAGE_KEY);
+  } catch { /* ignore */ }
+}
+
+export function getWebSpeechVoice(): string | null {
+  try { return localStorage.getItem(VOICE_STORAGE_KEY); } catch { return null; }
+}
+
+export function setWebSpeechConfig(pitch: number, rate: number): void {
+  try {
+    localStorage.setItem(PITCH_STORAGE_KEY, pitch.toString());
+    localStorage.setItem(RATE_STORAGE_KEY, rate.toString());
+  } catch { /* ignore */ }
+}
+
+export function getWebSpeechConfig(): { pitch: number; rate: number } {
+  try {
+    const p = localStorage.getItem(PITCH_STORAGE_KEY);
+    const r = localStorage.getItem(RATE_STORAGE_KEY);
+    return {
+      pitch: p ? parseFloat(p) : 0.95,
+      rate: r ? parseFloat(r) : 1.08,
+    };
+  } catch {
+    return { pitch: 0.95, rate: 1.08 };
+  }
+}
+
+/** Pick voice: stored URI first, then heuristic match for lang */
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  const storedURI = getWebSpeechVoice();
+  if (storedURI) {
+    const stored = voices.find((v) => v.voiceURI === storedURI);
+    if (stored) return stored;
+  }
+
+  const langPrefix = lang.split('-')[0];
+  const humanKeywords = /neural|enhanced|premium|natural|wavenet|studio/i;
+  const exactMatch   = voices.filter((v) => v.lang === lang);
+  const prefixMatch  = voices.filter((v) => v.lang.startsWith(langPrefix));
+  const langPool = exactMatch.length ? exactMatch : prefixMatch.length ? prefixMatch : voices;
+
+  const modelGender = getActiveModelGender();
+  const genderPool = langPool.filter((v) => {
+    const g = detectVoiceGender(v.name);
+    return g === modelGender || g === 'unknown';
+  });
+  const pool = genderPool.length > 0 ? genderPool : langPool;
+
+  return (
+    pool.find((v) => humanKeywords.test(v.name)) ??
+    pool.find((v) => v.localService) ??
+    pool.find((v) => v.default) ??
+    pool[0] ??
+    null
+  );
+}
+
+function detectLang(text: string): string {
+  if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) return 'ja-JP';
+  if (/[\uac00-\ud7af]/.test(text)) return 'ko-KR';
+  if (/[\u0e00-\u0e7f]/.test(text)) return 'th-TH';
+  return 'id-ID';
+}
+
+export function speakWithWebSpeech(text: string, opts: WebSpeechTTSOptions = {}): void {
+  if (!isWebSpeechTTSSupported()) {
+    opts.onError?.({ error: 'not-supported' });
+    return;
+  }
+
+  stopWebSpeech();
+
+  const lang = opts.lang ?? detectLang(text);
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+
+  const rateJitter  = (Math.random() - 0.5) * 0.03; // reduced jitter to honor user config
+  const pitchJitter = (Math.random() - 0.5) * 0.04;
+  
+  const { pitch: sysPitch, rate: sysRate } = getWebSpeechConfig();
+
+  utterance.rate   = opts.rate   ?? (sysRate + rateJitter);
+  utterance.pitch  = opts.pitch  ?? (sysPitch + pitchJitter);
+  utterance.volume = opts.volume ?? 1.0;
+
+  // Explicit voiceURI from caller wins
+  let voice: SpeechSynthesisVoice | null = null;
+  if (opts.voiceURI) {
+    voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === opts.voiceURI) ?? null;
+  }
+  if (!voice) voice = pickVoice(lang);
+  if (voice) utterance.voice = voice;
+
+  utterance.onstart = () => { startWebSpeechLipSync(); opts.onStart?.(); };
+  utterance.onend   = () => { stopWebSpeechLipSync(); _currentUtterance = null; opts.onEnd?.(); };
+  utterance.onerror = (e) => { stopWebSpeechLipSync(); _currentUtterance = null; opts.onError?.(e); };
+
+  _currentUtterance = utterance;
+  window.speechSynthesis.speak(utterance);
+}
+
+export function stopWebSpeech(): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    _currentUtterance = null;
+    stopWebSpeechLipSync();
+  }
+}
+
+export function isWebSpeechSpeaking(): boolean {
+  return typeof window !== 'undefined' &&
+    'speechSynthesis' in window &&
+    window.speechSynthesis.speaking;
+}
+
+export function preloadVoices(): void {
+  if (!isWebSpeechTTSSupported()) return;
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.addEventListener('voiceschanged', () => {
+    window.speechSynthesis.getVoices();
+  }, { once: true });
+}

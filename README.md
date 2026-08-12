@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="assets/Brahma_Lite_Logo.png" alt="Brahma Echo" width="260" />
+  <img src="assets/Brahma_Lite_Logo.png" alt="Niutron" width="260" />
 
-  <h1>Brahma Echo</h1>
+  <h1>Niutron</h1>
 
-  <p><strong>Open-source Windows desktop AI assistant</strong></p>
+  <p><strong>Asisten AI Desktop Windows Open-Source</strong></p>
   <p>Voice-first automation · contextual desktop intelligence · productivity workflows</p>
 
   <p>
@@ -21,27 +21,27 @@
 
 ---
 
-## Overview
+## Gambaran Umum
 
-Brahma Echo is a premium Windows desktop assistant that combines voice and text control with automated workflows, screen-aware intelligence, and rich content generation.
+Niutron adalah asisten desktop Windows premium yang menggabungkan kontrol suara dan teks dengan alur kerja otomatis, kecerdasan layar, dan pembuatan konten yang kaya.
 
-Designed for advanced desktop productivity, Brahma Echo delivers:
+Dirancang untuk produktivitas desktop tingkat lanjut, Niutron memberikan:
 
-- Voice-first command and desktop automation
-- Application control, browser workflows, and file handling
-- Contextual screen inspection and adaptive task execution
-- Presentation, document, and report generation
-- Remote control via Discord and Brahma Connect
+- Perintah voice-first dan otomasi desktop
+- Kontrol aplikasi, alur kerja browser, dan penanganan file
+- Inspeksi layar kontekstual dan eksekusi tugas adaptif
+- Pembuatan presentasi, dokumen, dan laporan
+- Kontrol jarak jauh via Discord dan Niutron Connect
 
-## Quick Highlights
+## Highlight Cepat
 
-| Core capability | Why it matters |
+| Kemampuan inti | Mengapa penting |
 |---|---|
-| Voice-first assistant | Speak commands naturally and stay hands-free |
-| Gemini + OpenRouter | Fast responses with resilient fallback support |
-| Screen-aware context | Ask about visible windows and on-screen content |
-| Document automation | Create presentations, docs, spreadsheets, and PDFs |
-| Plugin-ready | Extend features with lightweight Python plugins |
+| Asisten voice-first | Ucapkan perintah secara alami dan tetap hands-free |
+| Gemini + OpenRouter | Respons cepat dengan dukungan fallback yang tangguh |
+| Konteks sadar layar | Tanya tentang window yang terlihat dan konten di layar |
+| Otomasi dokumen | Buat presentasi, dokumen, spreadsheet, dan PDF |
+| Siap plugin | Perluas fitur dengan plugin Python ringan |
 
 ## Key Benefits
 
@@ -52,71 +52,71 @@ Designed for advanced desktop productivity, Brahma Echo delivers:
 - Secure local configuration with file-based credential storage
 - Device pairing and remote routing through Brahma Connect
 
-## Features
+## Fitur
 
-### Intelligent Assistant
+### Asisten Cerdas
 
-- Unified voice and typed command handling
-- Wake-word listening and responsive assistant activation
-- Dynamic screen inspection for context-aware answers
-- Automatic briefings with Edge TTS playback
-- Gemini-first AI with OpenRouter fallback resilience
+- Penanganan perintah suara dan ketikan terpadu
+- Mendengarkan wake-word dan aktivasi asisten yang responsif
+- Inspeksi layar dinamis untuk jawaban yang sadar konteks
+- Briefing otomatis dengan pemutaran Edge TTS
+- AI Gemini-first dengan ketahanan fallback OpenRouter
 
-### Productivity & Automation
+### Produktivitas & Otomasi
 
-- Open and control Windows apps, windows, files, and system actions
-- Browser automation with Playwright-driven workflows
-- Contextual automation based on screen content and notifications
-- Reminder, meeting assistance, and notification management
+- Kontrol buka dan aplikasi Windows, windows, file, dan aksi sistem
+- Otomasi browser dengan alur kerja yang digerakkan Playwright
+- Otomasi kontekstual berdasarkan konten layar dan notifikasi
+- Pengingat, bantuan rapat, dan manajemen notifikasi
 
-### Content & Office Tools
+### Alat Konten & Office
 
-- Generate presentation decks, summaries, and slide content
-- Create Word documents and spreadsheets from prompts
-- Export polished reports and deliverables as PDF
-- Build landing pages and website workspaces locally
+- Hasilkan deck presentasi, ringkasan, dan konten slide
+- Buat dokumen Word dan spreadsheet dari prompt
+- Ekspor laporan dan deliverable yang dipoles sebagai PDF
+- Bangun halaman landing dan workspace situs web secara lokal
 
-### Integrations
+### Integrasi
 
-- Discord bridge for remote commands and collaboration
-- OpenRouter fallback for uninterrupted AI access
-- Configurable voice, UI, startup, and notification settings
-- Brahma Connect for device discovery and command routing
+- Discord bridge untuk perintah jarak jauh dan kolaborasi
+- OpenRouter fallback untuk akses AI tanpa gangguan
+- Pengaturan suara, UI, startup, dan notifikasi yang dapat dikonfigurasi
+- Niutron Connect untuk penemuan perangkat dan perutean perintah
 
-## Getting Started
+## Memulai
 
-### Prerequisites
+### Prasyarat
 
-- Windows 10 or Windows 11
-- Python 3.11 or Python 3.12
-- Git installed
+- Windows 10 atau Windows 11
+- Python 3.11 atau Python 3.12
+- Git terinstal
 - Gemini API key
-- OpenRouter API key (optional but recommended)
+- OpenRouter API key (opsional tapi direkomendasikan)
 
-### 1. Clone the repository
+### 1. Clone repository
 
 ```powershell
-git clone https://github.com/titechprabhasolutions/Brahma-AI---Lite.git
-cd "Brahma AI - Lite"
+git clone https://github.com/yourusername/niutron.git
+cd niutron
 ```
 
-### 2. Create and activate a virtual environment
+### 2. Buat dan aktifkan virtual environment
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+### 3. Instal dependencies
 
 ```powershell
 pip install -r requirements.txt
 playwright install
 ```
 
-### 4. Configure API credentials
+### 4. Konfigurasi kredensial API
 
-Create `config/api_keys.json` with your keys:
+Buat `config/api_keys.json` dengan kunci Anda:
 
 ```json
 {
@@ -137,68 +137,68 @@ Create `config/api_keys.json` with your keys:
 2. Generate an `sk-or-` API key.
 3. Add the key to `openrouter_api_key`.
 
-### 5. Optional: Configure Discord integration
+### 5. Opsional: Konfigurasi integrasi Discord
 
-If you want Discord remote control, populate `config/discord_bot.json` with your bot credentials and connection settings.
+Jika Anda menginginkan kontrol jarak jauh Discord, isi `config/discord_bot.json` dengan kredensial bot dan pengaturan koneksi Anda.
 
-### 6. Launch Brahma Echo
+### 6. Jalankan Niutron
 
 ```powershell
 python main.py
 ```
 
-For a cleaner startup experience on Windows:
+Untuk pengalaman startup yang lebih bersih di Windows:
 
 ```powershell
-start_brahma.vbs
+start_niutron.vbs
 ```
 
-## Configuration
+## Konfigurasi
 
-Core configuration files:
+File konfigurasi inti:
 
-- `config/api_keys.json` — Gemini and OpenRouter credentials
-- `config/app_settings.json` — voice, UI, startup, and automation preferences
-- `config/brahma_connect.json` — device pairing, gateway, and discovery settings
-- `config/discord_bot.json` — Discord bridge configuration
+- `config/api_keys.json` — Kredensial Gemini dan OpenRouter
+- `config/app_settings.json` — preferensi suara, UI, startup, dan otomasi
+- `config/brahma_connect.json` — pemasangan perangkat, gateway, dan pengaturan penemuan
+- `config/discord_bot.json` — konfigurasi bridge Discord
 
-## Project Structure
+## Struktur Proyek
 
-- `main.py` — application startup, AI orchestration, and command routing
-- `ui.py` — Qt-based desktop interface and live assistant controls
-- `actions/` — modular automation, document, and assistant tools
-- `brahma_connect/` — local gateway, pairing, and remote routing
-- `config/` — local settings, credentials, and runtime configuration
-- `plugins/` — optional plugin extensions
-- `tests/` — integration and validation tests
+- `main.py` — startup aplikasi, orkestrasi AI, dan routing perintah
+- `ui.py` — antarmuka desktop berbasis Qt dan kontrol asisten langsung
+- `actions/` — otomasi modular, dokumen, dan alat asisten
+- `brahma_connect/` — gateway lokal, pemasangan, dan routing jarak jauh
+- `config/` — pengaturan lokal, kredensial, dan konfigurasi runtime
+- `plugins/` — ekstensi plugin opsional
+- `tests/` — tes integrasi dan validasi
 
-## Plugin System
+## Sistem Plugin
 
-Extend Brahma Echo with custom Python plugins by adding files to `plugins/`.
+Perluas Niutron dengan plugin Python kustom dengan menambahkan file ke `plugins/`.
 
-Supported hooks:
+Hook yang didukung:
 
-- `on_brahma_created(brahma)` — called when the assistant instance is initialized
-- `on_startup(brahma)` — called after startup when plugins are registered
-- `on_text_command(text, source, brahma=None)` — called for each incoming text command; return `True` to indicate the command was handled
+- `on_brahma_created(brahma)` — dipanggil saat instance asisten diinisialisasi
+- `on_startup(brahma)` — dipanggil setelah startup saat plugin terdaftar
+- `on_text_command(text, source, brahma=None)` — dipanggil untuk setiap perintah teks yang masuk; kembalikan `True` untuk menunjukkan perintah telah ditangani
 
-## Best Practices
+## Praktik Terbaik
 
-- Keep credentials in `config/api_keys.json` and avoid committing secrets.
-- Use the virtual environment for all development and runtime sessions.
-- Restart the app after changing config or adding plugins.
-- Review `config/app_settings.json` to tune voice, UI, and automation behavior.
+- Simpan kredensial di `config/api_keys.json` dan hindari commit secrets.
+- Gunakan virtual environment untuk semua sesi development dan runtime.
+- Restart aplikasi setelah mengubah config atau menambah plugin.
+- Tinjau `config/app_settings.json` untuk menyetel perilaku suara, UI, dan otomasi.
 
-## Community & Support
+## Komunitas & Dukungan
 
 - Discord: https://discord.gg/gEYmJKKtq3
 
-## License
+## Lisensi
 
-This project is published under a custom source-available license. See `LICENSE` for details.
+Proyek ini diterbitkan di bawah lisensi source-available kustom. Lihat `LICENSE` untuk detail.
 
-## Maintainer
+## Pembuat
 
-- Suryaansh Tiwari
+- Modified by: Your Name
 
-> Preserve attribution and keep credentials secure when building on top of Brahma Echo.
+> Pertahankan atribusi dan jaga keamanan kredensial saat membangun di atas Niutron.

@@ -83,7 +83,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-STARTUP_LOG     = Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "Brahma Echo" / "startup.log"
+STARTUP_LOG     = Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "Niutron" / "startup.log"
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
@@ -131,7 +131,7 @@ def _ensure_desktop_shortcut() -> None:
             desktop_dir = Path(os.path.expanduser("~")) / "Desktop"
             
         desktop_dir.mkdir(parents=True, exist_ok=True)
-        shortcut_path = desktop_dir / "Brahma Echo.lnk"
+        shortcut_path = desktop_dir / "Niutron.lnk"
         script_path = BASE_DIR / "main.py"
         icon_path = BASE_DIR / "assets" / "Brahma_Lite_Logo.ico"
 
@@ -164,7 +164,7 @@ def _ensure_desktop_shortcut() -> None:
             f"$Shortcut.Arguments = '{_ps_escape(shortcut_args)}'",
             f"$Shortcut.WorkingDirectory = '{_ps_escape(str(BASE_DIR))}'",
             "$Shortcut.WindowStyle = 7",
-            "$Shortcut.Description = 'Launch Brahma Echo'",
+            "$Shortcut.Description = 'Jalankan Niutron'",
             f"if ('{_ps_escape(icon_value)}') {{ $Shortcut.IconLocation = '{_ps_escape(icon_value)},0' }}",
             "$Shortcut.Save()",
         ])
@@ -187,10 +187,10 @@ def _load_system_prompt() -> str:
         return PROMPT_PATH.read_text(encoding="utf-8")
     except Exception:
         return (
-            "You are Brahma Echo, a calm, direct, and professional AI assistant. "
-            "Be concise, direct, and always use the provided tools to complete tasks. "
-            "Never simulate or guess results — always call the appropriate tool. "
-            "If the user asks to create, build, launch, or open a website, always use the selected workspace folder."
+            "Anda adalah Niutron, asisten AI yang tenang, langsung, dan profesional. "
+            "Bersikaplah ringkas, langsung, dan selalu gunakan alat yang disediakan untuk menyelesaikan tugas. "
+            "Jangan pernah mensimulasikan atau menebak hasil — selalu panggil alat yang sesuai. "
+            "Jika pengguna meminta untuk membuat, membangun, meluncurkan, atau membuka situs web, selalu gunakan folder workspace yang dipilih."
         )
 
 
@@ -228,8 +228,8 @@ def _gemini_text_reply(prompt: str) -> str:
         http_options={"api_version": "v1beta"},
     )
     system_prompt = (
-        "You are Brahma Echo, a concise, helpful desktop assistant. "
-        "Reply naturally and briefly. Do not mention internal implementation details."
+        "Anda adalah Niutron, asisten desktop yang ringkas dan membantu. "
+        "Balas secara alami dan singkat. Jangan sebutkan detail implementasi internal."
     )
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -313,18 +313,20 @@ def _wakeword_detected(text: str) -> bool:
     if not words:
         return False
     phrases = (
-        "brahma echo",
-        "hey brahma echo",
-        "hi brahma echo",
-        "hello brahma echo",
+        "niutron",
+        "hey niutron",
+        "hi niutron",
+        "halo niutron",
+        "hello niutron",
         "hey",
         "hi",
+        "halo",
         "hello",
     )
     compact = " ".join(words)
     if compact in phrases or any(p in compact for p in phrases):
         return True
-    return any(word in {"brahma echo", "hey", "hi", "hello"} for word in words)
+    return any(word in {"niutron", "hey", "hi", "halo", "hello"} for word in words)
 
 
 def _build_task_plan(text: str) -> list[str]:
@@ -875,7 +877,7 @@ TOOL_DECLARATIONS = [
         "name": "presentation_builder",
         "description": (
             "Creates editable PowerPoint presentations (.pptx) from a structured slide outline. "
-            "Brahma Echo automatically infers the best visual style from the topic, searches for a matching online template when available, "
+            "Niutron secara otomatis menyimpulkan gaya visual terbaik dari topik, mencari template online yang cocok saat tersedia, "
             "reuses cached templates, and falls back to the built-in designer if no suitable template is found. "
             "Use when the user asks for a deck, slideshow, presentation, pitch deck, or report slides."
         ),
@@ -886,7 +888,7 @@ TOOL_DECLARATIONS = [
                 "subtitle": {"type": "STRING", "description": "Optional subtitle or audience line"},
                 "theme": {
                     "type": "STRING",
-                    "description": "Optional presentation theme or visual direction such as neon, corporate, luxury, academic, sunset, or creative. If omitted, Brahma Echo infers the best style automatically."
+                    "description": "Tema presentasi opsional atau arah visual seperti neon, korporat, mewah, akademis, sunset, atau kreatif. Jika dihilangkan, Niutron menyimpulkan gaya terbaik secara otomatis."
                 },
                 "outline": {
                     "type": "STRING",
@@ -1044,10 +1046,10 @@ TOOL_DECLARATIONS = [
     {
         "name": "shutdown_brahma",
         "description": (
-            "Shuts down the assistant completely. "
-        "Call this when the user expresses intent to end the conversation, "
-        "close the assistant, say goodbye, or stop Brahma Echo. "
-        "The user can say this in ANY language."
+            "Mematikan asisten sepenuhnya. "
+        "Panggil ini saat pengguna mengungkapkan niat untuk mengakhiri percakapan, "
+        "menutup asisten, mengucapkan selamat tinggal, atau menghentikan Niutron. "
+        "Pengguna dapat mengatakan ini dalam BAHASA APA PUN."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -1201,10 +1203,10 @@ class BrahmaLive:
             devices = self._smart_home.list_devices()
             routed_text_home = sd_mgr.route_command(text, devices)
             if routed_text_home != text:
-                print(f"[BRAHMA ECHO] Redirection: '{text}' -> '{routed_text_home}'")
+                print(f"[NIUTRON] Pengalihan: '{text}' -> '{routed_text_home}'")
                 text = routed_text_home
         except Exception as e:
-            print(f"[BRAHMA ECHO] Redirection error: {e}")
+            print(f"[NIUTRON] Kesalahan pengalihan: {e}")
 
         developer_settings = self.ui._load_app_settings() if hasattr(self.ui, "_load_app_settings") else {}
         developer_enabled = bool(developer_settings.get("developer_mode_enabled", False))
@@ -1257,7 +1259,7 @@ class BrahmaLive:
             try:
                 self.ui.update_task_workspace(
                     status="Scanning screen",
-                    output="Brahma Echo is inspecting the screen for what you asked about.",
+                    output="Niutron sedang memeriksa layar untuk apa yang Anda tanyakan.",
                     percent=40,
                 )
             except Exception:
@@ -1918,8 +1920,14 @@ class BrahmaLive:
             self._is_speaking = value
         if value:
             self.ui.set_state("SPEAKING")
+            # Start lip sync animation in background VRM
+            if hasattr(self.ui, 'start_background_speaking'):
+                self.ui.start_background_speaking()
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
+            # Stop lip sync animation
+            if hasattr(self.ui, 'stop_background_speaking'):
+                self.ui.stop_background_speaking()
 
     def speak(self, text: str):
         if not self._loop or not self.session:
@@ -2289,6 +2297,15 @@ class BrahmaLive:
                             txt = sc.output_transcription.text.strip()
                             if txt:
                                 out_buf.append(txt)
+                                
+                                # Update VRM expression based on text sentiment
+                                try:
+                                    if hasattr(self.ui, '_vrm_avatar') and self.ui._vrm_avatar:
+                                        from core.vrm_avatar import detect_mood_from_text
+                                        mood = detect_mood_from_text(txt)
+                                        self.ui._vrm_avatar.set_expression(mood, 0.8)
+                                except Exception:
+                                    pass
 
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = sc.input_transcription.text.strip()
@@ -2356,12 +2373,28 @@ class BrahmaLive:
             while True:
                 chunk = await self.audio_in_queue.get()
                 self.set_speaking(True)
+                
+                # Trigger VRM speaking animation
+                try:
+                    if hasattr(self.ui, '_vrm_avatar') and self.ui._vrm_avatar:
+                        self.ui._vrm_avatar.start_speaking()
+                except Exception:
+                    pass
+                
                 await asyncio.to_thread(stream.write, chunk)
         except Exception as e:
             print(f"[BRAHMA ECHO] ❌ Play: {e}")
             raise
         finally:
             self.set_speaking(False)
+            
+            # Stop VRM speaking animation
+            try:
+                if hasattr(self.ui, '_vrm_avatar') and self.ui._vrm_avatar:
+                    self.ui._vrm_avatar.stop_speaking()
+            except Exception:
+                pass
+            
             stream.stop()
             stream.close()
 

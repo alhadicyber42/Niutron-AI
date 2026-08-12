@@ -47,6 +47,15 @@ from smart_home import SmartHomeService
 from smart_home_page_new import BrahmaHomePage, _DeviceTile
 from workspace_store import store as workspace_store
 
+# VRM Avatar Integration
+try:
+    from core.vrm_avatar import VRMAvatar, detect_mood_from_text, WEB_ENGINE_AVAILABLE
+    VRM_INTEGRATION_AVAILABLE = True
+    print("✅ VRM Integration available")
+except ImportError as e:
+    VRM_INTEGRATION_AVAILABLE = False
+    print(f"⚠️ VRM Integration not available: {e}")
+
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
@@ -109,18 +118,42 @@ class BackgroundWidget(QWidget):
             except Exception:
                 self._fallback_pixmap = None
         self._web_view = None
+        self._vrm_loaded = False
 
         if WEB_ENGINE_AVAILABLE:
             QTimer.singleShot(0, self._init_web_engine)
+
 
     def _init_web_engine(self):
         if self.width() <= 0 or self.height() <= 0:
             QTimer.singleShot(500, self._init_web_engine)
             return
         try:
-            html_path = BASE_DIR / "assets" / "web_background" / "index.html"
-            if html_path.exists():
+            # Use VRM viewer as background instead of bola kuning
+            vrm_html_path = BASE_DIR / "assets" / "vrm_viewer" / "index_working.html"
+            
+            # Fallback to old animation if VRM not available
+            if not vrm_html_path.exists():
+                vrm_html_path = BASE_DIR / "assets" / "vrm_viewer" / "index_simple.html"
+            
+            if not vrm_html_path.exists():
+                vrm_html_path = BASE_DIR / "assets" / "web_background" / "index.html"
+                print("[Background] Using fallback animation (bola kuning)")
+            else:
+                print(f"[Background] Using VRM viewer: {vrm_html_path.name}")
+            
+            if vrm_html_path.exists():
                 self._web_view = QWebEngineView(self)
+                
+                # Set page background color to black
+                try:
+                    from PyQt6.QtWebEngineCore import QWebEngineSettings
+                    page = self._web_view.page()
+                    # Force black background
+                    page.setBackgroundColor(QColor(0, 0, 0, 255))
+                except Exception as e:
+                    print(f"[Background] Could not set page color: {e}")
+                
                 st = self._web_view.settings()
                 try:
                     st.setAttribute(st.WebAttribute.WebGLEnabled, True)
@@ -129,13 +162,61 @@ class BackgroundWidget(QWidget):
                     st.setAttribute(st.WebAttribute.LocalContentCanAccessFileUrls, True)
                 except Exception:
                     pass
-                self._web_view.setUrl(QUrl.fromLocalFile(str(html_path)))
-                self._web_view.setStyleSheet("background: #000000;")
+                
+                # Load VRM viewer with black background stylesheet
+                self._web_view.setUrl(QUrl.fromLocalFile(str(vrm_html_path)))
+                self._web_view.setStyleSheet("background-color: #000000;")
                 self._web_view.resize(self.size())
                 self._web_view.lower()
                 self._web_view.show()
-        except Exception:
+                
+                # Load VRM model if this is VRM viewer
+                if "vrm_viewer" in str(vrm_html_path):
+                    QTimer.singleShot(3000, self._load_vrm_model)
+        except Exception as e:
+            print(f"[Background] Failed to init web engine: {e}")
             self._web_view = None
+
+    def _load_vrm_model(self):
+        """Load default VRM model in background"""
+        if not self._web_view:
+            return
+        
+        try:
+            # Check if vrmAPI is available
+            check_code = "typeof window.vrmAPI !== 'undefined' && typeof window.vrmAPI.loadVRM === 'function'"
+            
+            def on_check_result(is_ready):
+                if is_ready and not self._vrm_loaded:
+                    # Load VRM config to get active model
+                    try:
+                        config_path = BASE_DIR / "config" / "vrm_settings.json"
+                        if config_path.exists():
+                            import json
+                            with open(config_path, 'r') as f:
+                                config = json.load(f)
+                            
+                            active_model = config.get("active_model")
+                            if active_model and Path(active_model).exists():
+                                # Convert to file URI
+                                vrm_uri = Path(active_model).resolve().as_uri()
+                                print(f"[Background] Loading VRM: {Path(active_model).name}")
+                                
+                                # Load VRM
+                                js_code = f"window.vrmAPI.loadVRM('{vrm_uri}');"
+                                self._web_view.page().runJavaScript(js_code)
+                                self._vrm_loaded = True
+                            else:
+                                print("[Background] No active VRM model configured")
+                        else:
+                            print("[Background] No VRM config found")
+                    except Exception as e:
+                        print(f"[Background] Failed to load VRM config: {e}")
+            
+            self._web_view.page().runJavaScript(check_code, on_check_result)
+            
+        except Exception as e:
+            print(f"[Background] Failed to load VRM model: {e}")
 
     def _load_background(self) -> None:
         pass
@@ -144,7 +225,49 @@ class BackgroundWidget(QWidget):
         if self._web_view:
             try:
                 st = (state or "IDLE").strip()
-                self._web_view.page().runJavaScript(f"if(window.setBrahmaState) window.setBrahmaState('{st}');")
+                # For VRM viewer, update expression based on state
+                if self._vrm_loaded:
+                    if st == "LISTENING":
+                        self._web_view.page().runJavaScript("if(window.vrmAPI) window.vrmAPI.setMood('neutral', 1.0);")
+                    elif st == "THINKING":
+                        self._web_view.page().runJavaScript("if(window.vrmAPI) window.vrmAPI.setMood('neutral', 0.8);")
+                    elif st == "SPEAKING":
+                        self._web_view.page().runJavaScript("if(window.vrmAPI) window.vrmAPI.setMood('happy', 0.6);")
+                else:
+                    # Fallback to old animation state
+                    self._web_view.page().runJavaScript(f"if(window.setBrahmaState) window.setBrahmaState('{st}');")
+            except Exception:
+                pass
+
+    def start_speaking(self):
+        """Start lip sync animation when speaking"""
+        if self._web_view and self._vrm_loaded:
+            try:
+                # Start lip sync with random levels
+                js_code = """
+                if (window.vrmAPI && !window.lipSyncInterval) {
+                    window.lipSyncInterval = setInterval(() => {
+                        const level = 0.3 + Math.random() * 0.5;
+                        window.vrmAPI.updateLipSync(level);
+                    }, 100);
+                }
+                """
+                self._web_view.page().runJavaScript(js_code)
+            except Exception:
+                pass
+
+    def stop_speaking(self):
+        """Stop lip sync animation"""
+        if self._web_view and self._vrm_loaded:
+            try:
+                js_code = """
+                if (window.vrmAPI && window.lipSyncInterval) {
+                    clearInterval(window.lipSyncInterval);
+                    window.lipSyncInterval = null;
+                    window.vrmAPI.updateLipSync(0);
+                }
+                """
+                self._web_view.page().runJavaScript(js_code)
             except Exception:
                 pass
 
@@ -216,13 +339,13 @@ class RemoteKeyOverlay(QWidget):
         except Exception:
             pass
 
-        title = QLabel("Mobile Connect")
+        title = QLabel("Koneksi Mobile")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         title.setStyleSheet("color: #ffffff; background: transparent; border: none;")
         lay.addWidget(title)
 
-        subtitle = QLabel("Scan the QR code with your phone to remotely control Brahma Echo.")
+        subtitle = QLabel("Pindai kode QR dengan ponsel Anda untuk mengontrol Niutron dari jarak jauh.")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setWordWrap(True)
         subtitle.setFont(QFont("Segoe UI", 9))
@@ -239,7 +362,7 @@ class RemoteKeyOverlay(QWidget):
         qr_row.addStretch()
         lay.addLayout(qr_row)
 
-        manual_hint = QLabel("Manual address")
+        manual_hint = QLabel("Alamat manual")
         manual_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         manual_hint.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         manual_hint.setStyleSheet(f"color: {C.TEXT_DIM}; border: none; margin-top: 10px;")
@@ -378,7 +501,7 @@ class RemoteKeyOverlay(QWidget):
         self._qr_label.setText("OK")
         self._qr_label.setFont(QFont("Segoe UI", 34, QFont.Weight.Black))
         self._qr_label.setStyleSheet("color: #37ff5f; background: #041006; border-radius: 12px;")
-        self._timer_lbl.setText("Phone connected. Brahma Echo remote is ready.")
+        self._timer_lbl.setText("Ponsel terhubung. Remote Niutron siap.")
 
     def _refresh_key(self):
         if not self._on_new_key:
@@ -6346,6 +6469,20 @@ class FloatingLauncher(QWidget):
         self._state = (state or "idle").strip().lower()
         self._status_line = (detail or self._default_status()).strip() or self._default_status()
         self._apply_state_style()
+        
+        # Update background VRM expression based on state
+        if hasattr(self, '_background_widget') and self._background_widget:
+            self._background_widget.set_ai_state(state.upper())
+
+    def start_background_speaking(self):
+        """Start lip sync animation in background VRM"""
+        if hasattr(self, '_background_widget') and self._background_widget:
+            self._background_widget.start_speaking()
+    
+    def stop_background_speaking(self):
+        """Stop lip sync animation in background VRM"""
+        if hasattr(self, '_background_widget') and self._background_widget:
+            self._background_widget.stop_speaking()
 
     def _default_status(self) -> str:
         return {
@@ -6524,9 +6661,23 @@ class MainWindow(QMainWindow):
         self._meeting_overlay_collapsed = False
         self._chat_source_queue: deque[str] = deque()
 
+        # Initialize VRM Avatar Viewer as overlay (not as background replacement)
+        self._vrm_avatar = None
+        if VRM_INTEGRATION_AVAILABLE:
+            try:
+                from core.vrm_avatar import VRMAvatar
+                self._vrm_avatar = VRMAvatar(self)
+                print("✅ VRM Avatar Viewer initialized")
+            except Exception as e:
+                print(f"⚠️ VRM Avatar initialization failed: {e}")
+                self._vrm_avatar = None
+
         central = BackgroundWidget(BACKGROUND_IMAGE_FILE if BACKGROUND_IMAGE_FILE.exists() else None)
         central.setStyleSheet("background: transparent;")
         self.setCentralWidget(central)
+        
+        # Store reference to background for lip sync control
+        self._background_widget = central
 
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
@@ -6866,6 +7017,38 @@ class MainWindow(QMainWindow):
         self._right_collapsed = not self._right_collapsed
         self._apply_sidebar_state()
 
+    def _load_vrm_default_model(self):
+        """Load default VRM model from config"""
+        if not hasattr(self, '_vrm_avatar') or not self._vrm_avatar:
+            print("[VRM] No VRM avatar instance")
+            return
+        
+        try:
+            from core.vrm_integration import load_vrm_config, get_available_vrm_models
+            config = load_vrm_config()
+            active_model = config.get("active_model")
+            
+            # Try active model first
+            if active_model and Path(active_model).exists():
+                print(f"[VRM] 📦 Loading active model: {Path(active_model).name}")
+                self._vrm_avatar.load_vrm(active_model)
+                return
+            
+            # Otherwise try first available model
+            models = get_available_vrm_models()
+            if models:
+                first_model = models[0]["path"]
+                print(f"[VRM] 📦 Loading first available model: {Path(first_model).name}")
+                self._vrm_avatar.load_vrm(first_model)
+            else:
+                print("[VRM] ⚠️ No VRM models found. Upload a model in Settings → AVATAR VRM")
+                
+        except Exception as e:
+            print(f"[VRM] ❌ Failed to load model: {e}")
+            import traceback
+            traceback.print_exc()
+
+
     def _apply_sidebar_state(self):
         if hasattr(self, "_left_content"):
             self._left_content.setVisible(not self._left_collapsed)
@@ -6915,10 +7098,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         if hasattr(self, "_right_panel"):
-            self._right_panel.setVisible(page == "dashboard")
+            # Show right panel in dashboard for avatar/chat, and in settings for VRM management
+            self._right_panel.setVisible(page == "dashboard" or page == "settings")
         if hasattr(self, "_right_stack") and isinstance(self._right_stack, QStackedWidget):
             self._right_stack.setCurrentIndex({"dashboard": 0, "settings": 1, "home": 2}.get(page, 2))
-            self._right_stack.setVisible(page == "dashboard")
+            # Show right stack in both dashboard and settings
+            self._right_stack.setVisible(page == "dashboard" or page == "settings")
         if self._settings_bridge and hasattr(self._settings_bridge, "set_dashboard_page"):
             try:
                 self._settings_bridge.set_dashboard_page(page == "dashboard")
@@ -8120,14 +8305,20 @@ class MainWindow(QMainWindow):
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.hud.setMinimumSize(240, 240)
         self.hud.setMaximumSize(280, 280)
-        self.hud.hide()
+        self.hud.hide()  # Hide HUD karena VRM ada di background
+        
+        # VRM sekarang ada di background (BackgroundWidget), tidak perlu overlay lagi
+        
         hud_wrap = QFrame()
         hud_wrap.setStyleSheet("background: transparent;")
         hud_lay = QVBoxLayout(hud_wrap)
         hud_lay.setContentsMargins(0, 0, 0, 0)
         hud_lay.setSpacing(0)
-        hud_lay.addWidget(self.hud, alignment=Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        hud_wrap.hide()
+        
+        # Center content tetap kosong karena VRM ada di background
+        hud_lay.addStretch(1)
+        
+        print("[UI] VRM avatar di-render sebagai background")
 
         command_row = QHBoxLayout()
         command_row.setSpacing(14)
@@ -8187,6 +8378,7 @@ class MainWindow(QMainWindow):
         chat_lay.setContentsMargins(0, 4, 0, 0)
         chat_lay.setSpacing(8)
 
+        # Chat workspace only
         self._inline_workspace = InlineChatWorkspace()
         self._inline_workspace.attach_requested.connect(self._browse_attachment)
         self._inline_workspace.mic_requested.connect(self._toggle_mute)
@@ -8406,6 +8598,16 @@ class SystemConnectivitySidebar(QFrame):
         self._mk_quick_action("📄 View Logs", QStyle.StandardPixmap.SP_FileDialogDetailedView, self._view_logs)
         self._mk_quick_action("⬇ Check for Updates", QStyle.StandardPixmap.SP_ArrowDown, self._check_updates)
 
+        # VRM Avatar Management Section
+        if VRM_INTEGRATION_AVAILABLE:
+            vrm_title = QLabel("AVATAR VRM")
+            vrm_title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+            vrm_title.setStyleSheet(f"color: {C.WHITE}; letter-spacing: 1px;")
+            lay.addWidget(vrm_title)
+
+            self._vrm_section = self._build_vrm_management_section()
+            lay.addWidget(self._vrm_section)
+
         tip = QFrame()
         tip.setStyleSheet("QFrame { background: rgba(24, 18, 8, 0.85); border: 1px solid rgba(255, 191, 0, 0.22); border-radius: 14px; }")
         tip_lay = QVBoxLayout(tip)
@@ -8482,6 +8684,292 @@ class SystemConnectivitySidebar(QFrame):
             self._info_rows["Platform"].setText(platform.system())
             self._info_rows["Current AI Provider"].setText("Gemini")
             self._info_rows["Last Updated"].setText(time.strftime("%d %b %Y %H:%M"))
+
+    def _build_vrm_management_section(self) -> QFrame:
+        """Build VRM Avatar management section for settings"""
+        from core.vrm_integration import (
+            get_available_vrm_models, 
+            load_vrm_config, 
+            save_vrm_config,
+            VRM_MODELS_DIR
+        )
+        
+        section = QFrame()
+        section.setStyleSheet("""
+            QFrame {
+                background: rgba(14, 16, 20, 0.88);
+                border: 1px solid rgba(255, 170, 48, 0.18);
+                border-radius: 14px;
+            }
+            QComboBox {
+                background: rgba(255, 255, 255, 0.05);
+                color: #f4f6f8;
+                border: 1px solid rgba(255, 170, 48, 0.3);
+                border-radius: 6px;
+                padding: 6px 8px;
+                min-height: 32px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 6px solid #ffaa30;
+                margin-right: 6px;
+            }
+            QComboBox QAbstractItemView {
+                background: #0d0f14;
+                color: #f4f6f8;
+                border: 1px solid rgba(255, 170, 48, 0.3);
+                selection-background-color: rgba(255, 170, 48, 0.2);
+            }
+            QPushButton {
+                background: rgba(255, 170, 48, 0.08);
+                color: #f4f6f8;
+                border: 1px solid rgba(255, 170, 48, 0.2);
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 11px;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 170, 48, 0.15);
+                border: 1px solid rgba(255, 170, 48, 0.4);
+            }
+            QLabel {
+                color: #f4f6f8;
+                background: transparent;
+                border: none;
+            }
+        """)
+        
+        lay = QVBoxLayout(section)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(10)
+        
+        # Model selector
+        model_label = QLabel("📦 Model VRM:")
+        model_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        lay.addWidget(model_label)
+        
+        self._vrm_model_selector = QComboBox()
+        lay.addWidget(self._vrm_model_selector)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
+        
+        upload_btn = QPushButton("📤 Upload")
+        upload_btn.setToolTip("Upload file VRM baru")
+        upload_btn.clicked.connect(self._upload_vrm_model)
+        btn_layout.addWidget(upload_btn)
+        
+        refresh_btn = QPushButton("🔄")
+        refresh_btn.setFixedWidth(40)
+        refresh_btn.setToolTip("Refresh daftar model")
+        refresh_btn.clicked.connect(self._refresh_vrm_models)
+        btn_layout.addWidget(refresh_btn)
+        
+        delete_btn = QPushButton("🗑️")
+        delete_btn.setFixedWidth(40)
+        delete_btn.setToolTip("Hapus model yang dipilih")
+        delete_btn.clicked.connect(self._delete_vrm_model)
+        btn_layout.addWidget(delete_btn)
+        
+        lay.addLayout(btn_layout)
+        
+        # Info label
+        self._vrm_info_label = QLabel("")
+        self._vrm_info_label.setStyleSheet("color: #8e949d; font-size: 10px;")
+        self._vrm_info_label.setWordWrap(True)
+        lay.addWidget(self._vrm_info_label)
+        
+        # Store config reference
+        self._vrm_config = load_vrm_config()
+        
+        # Initialize model list
+        self._refresh_vrm_models()
+        
+        # Connect model selection change
+        self._vrm_model_selector.currentIndexChanged.connect(self._on_vrm_model_changed)
+        
+        return section
+    
+    def _refresh_vrm_models(self):
+        """Refresh VRM model list"""
+        from core.vrm_integration import get_available_vrm_models
+        
+        current_selection = self._vrm_model_selector.currentText()
+        self._vrm_model_selector.clear()
+        
+        models = get_available_vrm_models()
+        
+        if not models:
+            self._vrm_model_selector.addItem("(Belum ada model)")
+            self._vrm_model_selector.setEnabled(False)
+            self._vrm_info_label.setText("Upload file VRM untuk mulai menggunakan avatar.")
+            return
+        
+        self._vrm_model_selector.setEnabled(True)
+        for model in models:
+            size_mb = model["size"] / (1024 * 1024)
+            display_text = f"{model['name']} ({size_mb:.1f} MB)"
+            self._vrm_model_selector.addItem(display_text, model["path"])
+        
+        # Restore selection or load active model
+        active_model = self._vrm_config.get("active_model")
+        if active_model:
+            for i in range(self._vrm_model_selector.count()):
+                model_path = self._vrm_model_selector.itemData(i)
+                if model_path and Path(model_path).stem == Path(active_model).stem:
+                    self._vrm_model_selector.setCurrentIndex(i)
+                    break
+        
+        self._update_vrm_info()
+    
+    def _update_vrm_info(self):
+        """Update VRM info label"""
+        if self._vrm_model_selector.currentText() == "(Belum ada model)":
+            self._vrm_info_label.setText("Upload file VRM untuk mulai menggunakan avatar.")
+        else:
+            idx = self._vrm_model_selector.currentIndex()
+            if idx >= 0:
+                model_path = self._vrm_model_selector.itemData(idx)
+                if model_path:
+                    self._vrm_info_label.setText(f"Model aktif. Avatar akan ditampilkan di panel kanan.")
+    
+    def _on_vrm_model_changed(self, index):
+        """Handle VRM model selection change"""
+        from core.vrm_integration import save_vrm_config
+        
+        if index < 0 or self._vrm_model_selector.currentText() == "(Belum ada model)":
+            return
+        
+        model_path = self._vrm_model_selector.itemData(index)
+        
+        if model_path and Path(model_path).exists():
+            # Save to config
+            self._vrm_config["active_model"] = model_path
+            save_vrm_config(self._vrm_config)
+            
+            # Load model in avatar viewer if available
+            if self._bridge() and hasattr(self._bridge(), "_win"):
+                win = self._bridge()._win
+                if hasattr(win, "_vrm_avatar") and win._vrm_avatar:
+                    win._vrm_avatar.load_vrm(model_path)
+                    print(f"[VRM] Model loaded: {Path(model_path).stem}")
+            
+            self._update_vrm_info()
+    
+    def _upload_vrm_model(self):
+        """Upload a new VRM model file"""
+        from core.vrm_integration import VRM_MODELS_DIR
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Upload Model VRM",
+            str(Path.home()),
+            "VRM Files (*.vrm);;All Files (*.*)"
+        )
+        
+        if not file_path:
+            return
+        
+        source_path = Path(file_path)
+        dest_path = VRM_MODELS_DIR / source_path.name
+        
+        if dest_path.exists():
+            reply = QMessageBox.question(
+                self,
+                "File Sudah Ada",
+                f"Model '{source_path.name}' sudah ada. Timpa file lama?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.No:
+                return
+        
+        try:
+            import shutil
+            VRM_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, dest_path)
+            
+            print(f"[VRM] Uploaded: {source_path.name}")
+            
+            # Refresh list and select new model
+            self._refresh_vrm_models()
+            
+            # Auto-select the newly uploaded model
+            for i in range(self._vrm_model_selector.count()):
+                if source_path.stem in self._vrm_model_selector.itemText(i):
+                    self._vrm_model_selector.setCurrentIndex(i)
+                    break
+            
+            QMessageBox.information(
+                self,
+                "Upload Berhasil",
+                f"Model VRM '{source_path.name}' berhasil di-upload!"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Upload Gagal",
+                f"Gagal meng-upload file VRM:\n{str(e)}"
+            )
+    
+    def _delete_vrm_model(self):
+        """Delete the currently selected VRM model"""
+        if self._vrm_model_selector.currentText() == "(Belum ada model)":
+            return
+        
+        idx = self._vrm_model_selector.currentIndex()
+        if idx < 0:
+            return
+        
+        model_path = self._vrm_model_selector.itemData(idx)
+        if not model_path or not Path(model_path).exists():
+            return
+        
+        model_name = Path(model_path).name
+        
+        reply = QMessageBox.question(
+            self,
+            "Konfirmasi Hapus",
+            f"Yakin ingin menghapus model '{model_name}'?\n\nTindakan ini tidak dapat dibatalkan.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                Path(model_path).unlink()
+                print(f"[VRM] Deleted: {model_name}")
+                
+                # Update config if deleted model was active
+                if self._vrm_config.get("active_model") == model_path:
+                    from core.vrm_integration import save_vrm_config
+                    self._vrm_config["active_model"] = None
+                    save_vrm_config(self._vrm_config)
+                
+                self._refresh_vrm_models()
+                
+                QMessageBox.information(
+                    self,
+                    "Hapus Berhasil",
+                    f"Model '{model_name}' berhasil dihapus."
+                )
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Hapus Gagal",
+                    f"Gagal menghapus model:\n{str(e)}"
+                )
 
 
 class SystemConnectivityPage(QWidget):
@@ -9858,6 +10346,20 @@ class BrahmaUI:
         except Exception:
             pass
         self._win = MainWindow(face_path)
+        
+        # Initialize VRM Avatar Panel
+        if VRM_INTEGRATION_AVAILABLE:
+            try:
+                self._vrm_panel = create_vrm_avatar_dock(self._win)
+                self._win._vrm_panel = self._vrm_panel
+                # Try to load default model after UI is ready
+                QTimer.singleShot(2000, self._vrm_panel.load_default_model)
+            except Exception as e:
+                print(f"⚠️ VRM Panel initialization failed: {e}")
+                self._vrm_panel = None
+        else:
+            self._vrm_panel = None
+        
         try:
             self._win._startup_enabled()
         except Exception:
