@@ -1,6 +1,3 @@
-<div align="center">
-  <img src="assets/Brahma_Lite_Logo.png" alt="Niutron AI" width="260" />
-
   <h1>🤖 Niutron AI</h1>
 
   <p><strong>Asisten AI Desktop Windows dengan VRM Avatar 3D</strong></p>
